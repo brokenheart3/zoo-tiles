@@ -1,86 +1,52 @@
-// -----------------------------
-// Grid Configs for Zoo-Tiles
-// -----------------------------
-export type GridSize = 6 | 8 | 10 | 12;
+// src/game/types.ts
 
-export type SubGridConfig = {
-  rows: number;
-  cols: number;
-};
-
-export type GridConfig = {
-  size: GridSize;
-  subgrid: SubGridConfig;
-  symbolCount: number; // number of unique animals per grid
-};
-
-// Predefined grid configs
-export const GRID_CONFIGS: Record<GridSize, GridConfig> = {
-  6: { size: 6, subgrid: { rows: 3, cols: 2 }, symbolCount: 6 },
-  8: { size: 8, subgrid: { rows: 4, cols: 2 }, symbolCount: 8 },
-  10: { size: 10, subgrid: { rows: 5, cols: 2 }, symbolCount: 10 },
-  12: { size: 12, subgrid: { rows: 3, cols: 4 }, symbolCount: 12 },
-};
-
-// -----------------------------
-// Helper function: subgrid index
-// -----------------------------
-export function getSubgridIndex(
-  row: number,
-  col: number,
-  gridSize: GridSize
-): number {
-  const { rows, cols } = GRID_CONFIGS[gridSize].subgrid;
-
-  const subgridRow = Math.floor(row / rows);
-  const subgridCol = Math.floor(col / cols);
-
-  return subgridRow * (gridSize / cols) + subgridCol;
+/**
+ * A single cell in the puzzle grid
+ */
+export interface Cell {
+  value: number | null;   // number representing the animal tile (1,2,...)
+  fixed: boolean;         // true if this tile is given and cannot be changed
 }
 
-// -----------------------------
-// Cell and Puzzle Types
-// -----------------------------
-export type Cell = {
-  value: number | null; // 1..N (later mapped to animals), null if empty
-  fixed: boolean;       // true if part of the original puzzle
-};
+/**
+ * A full puzzle grid
+ */
+export interface Puzzle {
+  grid: Cell[][];         // 2D array representing the puzzle
+  gridSize: number;       // size of the grid: 6, 8, 10, 12
+  difficulty: Difficulty; // difficulty level of the puzzle
+  id?: number;            // optional unique ID for the puzzle
+}
 
-export type Puzzle = {
-  id: string;           // unique puzzle ID from sudoAPI
-  size: GridSize;       // 6,8,10,12
-  grid: Cell[][];       // 2D array of cells
-  solution?: number[][]; // optional full solution
-};
+/**
+ * Difficulty levels for puzzles
+ */
+export type Difficulty = "easy" | "medium" | "hard";
 
-// -----------------------------
-// Example (for testing)
-// -----------------------------
-export const examplePuzzle: Puzzle = {
-  id: "6_easy_1",
-  size: 6,
-  grid: [
-    [
-      { value: 1, fixed: true },
-      { value: null, fixed: false },
-      { value: 3, fixed: true },
-      { value: null, fixed: false },
-      { value: 5, fixed: true },
-      { value: null, fixed: false },
-    ],
-    [
-      { value: null, fixed: false },
-      { value: 2, fixed: true },
-      { value: null, fixed: false },
-      { value: 4, fixed: true },
-      { value: null, fixed: false },
-      { value: 6, fixed: true },
-    ],
-    // 4 more rows ...
-  ],
-  solution: [
-    [1,2,3,4,5,6],
-    [6,2,5,4,1,3],
-    // ...
-  ],
-};
+/**
+ * Metadata for a challenge (daily or weekly)
+ */
+export interface Challenge {
+  type: "daily" | "weekly"; // type of challenge
+  puzzleId: number;         // unique puzzle ID in challenge
+  gridSize: number;         // grid size for this challenge
+  difficulty: Difficulty;   // difficulty level
+  date: string;             // ISO string: "YYYY-MM-DD" for daily, start date for weekly
+  maxAttempts: number;      // max attempts allowed per player
+}
+
+/**
+ * Player statistics structure
+ */
+export interface Stats {
+  puzzlesCompleted: number;                  // total puzzles completed
+  bestTimes: { [gridSize: string]: string };// best times per grid size, e.g., { "6x6": "2m 15s" }
+  dailyScore: number;                        // cumulative daily challenge score
+  weeklyScore: number;                       // cumulative weekly challenge score
+  accuracy: number;                          // percentage of correct tiles filled
+}
+
+/**
+ * Optional type for the mapping of numbers to animal emojis
+ */
+export type AnimalMap = { [key: number]: string };
