@@ -4,9 +4,7 @@ import BottomTabs from "./BottomTabs";
 
 const AppNavigator = () => {
   return (
-    <NavigationContainer>
       <BottomTabs />
-    </NavigationContainer>
   );
 };
 

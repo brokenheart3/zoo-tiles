@@ -7,7 +7,7 @@ export interface Trophy {
   id: string;
   name: string;
   description: string;
-  icon: string; // Emoji or icon name
+  icon: string;
   unlocked: boolean;
   unlockDate?: string;
   category: 'game' | 'time' | 'special';
@@ -27,7 +27,7 @@ export interface ProfileData {
   bio: string;
   stats: {
     puzzlesSolved: number;
-    accuracy: number; // Change from string to number for calculations
+    accuracy: number;
     currentStreak: number;
     totalPlayDays: number;
     lastPlayDate?: string;
@@ -46,7 +46,7 @@ const defaultProfile: ProfileData = {
   bio: 'Puzzle enthusiast and problem solver',
   stats: {
     puzzlesSolved: 987,
-    accuracy: 92, // Percentage as number
+    accuracy: 92,
     currentStreak: 7,
     totalPlayDays: 45,
     weekendPuzzles: 120,
@@ -137,7 +137,10 @@ interface ProfileContextType {
   updateProfile: (newProfile: Partial<ProfileData>) => Promise<void>;
   resetProfile: () => Promise<void>;
   unlockTrophy: (trophyId: string) => Promise<void>;
-  checkAndUnlockTrophies: () => Promise<void>;
+  checkAndUnlockTrophies: () => Promise<Trophy[]>;
+  getUnlockedTrophies: () => Trophy[];
+  getLockedTrophies: () => Trophy[];
+  isLoading: boolean; // Add loading state
 }
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
@@ -156,7 +159,7 @@ interface ProfileProviderProps {
 
 export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<ProfileData>(defaultProfile);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading true
 
   // Load profile from AsyncStorage on mount
   useEffect(() => {
@@ -172,7 +175,7 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     } catch (error) {
       console.error('Failed to load profile:', error);
     } finally {
-      setIsLoaded(true);
+      setIsLoading(false);
     }
   };
 
@@ -193,7 +196,7 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
         return {
           ...trophy,
           unlocked: true,
-          unlockDate: new Date().toISOString().split('T')[0] // YYYY-MM-DD format
+          unlockDate: new Date().toISOString().split('T')[0]
         };
       }
       return trophy;
@@ -209,9 +212,8 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     }
   };
 
-  const checkAndUnlockTrophies = async () => {
+  const checkAndUnlockTrophies = async (): Promise<Trophy[]> => {
     const updatedTrophies = profile.trophies.map(trophy => {
-      // Skip already unlocked trophies
       if (trophy.unlocked) return trophy;
 
       let shouldUnlock = false;
@@ -245,7 +247,6 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
       return trophy;
     });
 
-    // Check if any trophies were newly unlocked
     const newlyUnlocked = updatedTrophies.filter((trophy, index) => 
       trophy.unlocked && !profile.trophies[index].unlocked
     );
@@ -266,6 +267,14 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     return [];
   };
 
+  const getUnlockedTrophies = (): Trophy[] => {
+    return profile?.trophies?.filter(trophy => trophy.unlocked) || []; // Safe access
+  };
+
+  const getLockedTrophies = (): Trophy[] => {
+    return profile?.trophies?.filter(trophy => !trophy.unlocked) || []; // Safe access
+  };
+
   const resetProfile = async () => {
     setProfile(defaultProfile);
     try {
@@ -275,8 +284,9 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     }
   };
 
-  if (!isLoaded) {
-    return null;
+  // Return loading state if still loading
+  if (isLoading) {
+    return null; // Or a loading spinner component
   }
 
   return (
@@ -285,7 +295,10 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
       updateProfile, 
       resetProfile,
       unlockTrophy,
-      checkAndUnlockTrophies 
+      checkAndUnlockTrophies,
+      getUnlockedTrophies,
+      getLockedTrophies,
+      isLoading
     }}>
       {children}
     </ProfileContext.Provider>

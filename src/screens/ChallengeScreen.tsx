@@ -1,3 +1,4 @@
+// src/screen/ChallengeScreen.tsx
 import React from "react";
 import { createMaterialTopTabNavigator } from "@react-navigation/material-top-tabs";
 import DailyChallengeScreen from "./DailyChallengeScreen";

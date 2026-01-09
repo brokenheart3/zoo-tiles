@@ -1,4 +1,4 @@
-import React, { useState, useContext } from "react";
+import React, { useState, useContext } from 'react';
 import { 
   View, 
   Text, 
@@ -6,39 +6,43 @@ import {
   StyleSheet, 
   ScrollView, 
   SafeAreaView 
-} from "react-native";
-import { ThemeContext, themeStyles, ThemeType } from "../context/ThemeContext";
+} from 'react-native';
+import { ThemeContext, themeStyles, ThemeType } from '../context/ThemeContext';
+import { useSettings, GridSize, Difficulty } from '../context/SettingsContext';
 
-const themes: ThemeType[] = ["light", "dark", "forest", "ocean", "sunset", "lavender", "mint"];
-const gridSizes = ["6x6", "8x8", "10x10", "12x12"];
-const difficulties = ["Easy", "Medium", "Hard", "Expert"];
-
-type GridSize = "6x6" | "8x8" | "10x10" | "12x12";
-type Difficulty = "Easy" | "Medium" | "Hard" | "Expert";
+const themes: ThemeType[] = ['light', 'dark', 'forest', 'ocean', 'sunset', 'lavender', 'mint'];
+const gridSizes: GridSize[] = ['6x6', '8x8', '10x10', '12x12'];
+const difficulties: Difficulty[] = ['Easy', 'Medium', 'Hard', 'Expert'];
 
 const AppSettingsScreen: React.FC = () => {
   const { theme, setThemeGlobal } = useContext(ThemeContext);
+  const { settings, updateSettings } = useSettings();
+  
   const [selectedTheme, setSelectedTheme] = useState<ThemeType>(theme);
-  const [selectedGridSize, setSelectedGridSize] = useState<GridSize>("8x8");
-  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>("Medium");
+  const [selectedGridSize, setSelectedGridSize] = useState<GridSize>(settings.gridSize);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(settings.difficulty);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    // Update theme in ThemeContext
     setThemeGlobal(selectedTheme);
-    // Here you would save all settings to AsyncStorage or context
-    // AsyncStorage.setItem("gridSize", selectedGridSize);
-    // AsyncStorage.setItem("difficulty", selectedDifficulty);
-    // AsyncStorage.setItem("appTheme", selectedTheme);
-    alert("Settings saved successfully!");
+    
+    // Update other settings in SettingsContext
+    await updateSettings({
+      gridSize: selectedGridSize,
+      difficulty: selectedDifficulty,
+    });
+    
+    alert('Settings saved successfully!');
   };
 
   const colors = themeStyles[selectedTheme];
 
   // Difficulty-specific colors
   const difficultyColors = {
-    Easy: { bg: "#4CAF50", text: "#ffffff" },
-    Medium: { bg: "#FF9800", text: "#ffffff" },
-    Hard: { bg: "#F44336", text: "#ffffff" },
-    Expert: { bg: "#9C27B0", text: "#ffffff" },
+    Easy: { bg: '#4CAF50', text: '#ffffff' },
+    Medium: { bg: '#FF9800', text: '#ffffff' },
+    Hard: { bg: '#F44336', text: '#ffffff' },
+    Expert: { bg: '#9C27B0', text: '#ffffff' },
   };
 
   return (
@@ -62,7 +66,7 @@ const AppSettingsScreen: React.FC = () => {
                     ? { backgroundColor: colors.button } 
                     : { backgroundColor: `${colors.button}30` }
                 ]}
-                onPress={() => setSelectedGridSize(size as GridSize)}
+                onPress={() => setSelectedGridSize(size)}
               >
                 {selectedGridSize === size && (
                   <View style={[styles.checkmark, { backgroundColor: colors.text }]}>
@@ -73,7 +77,7 @@ const AppSettingsScreen: React.FC = () => {
                   styles.optionButtonText,
                   { 
                     color: selectedGridSize === size ? colors.text : colors.text,
-                    fontWeight: selectedGridSize === size ? "bold" : "normal"
+                    fontWeight: selectedGridSize === size ? 'bold' : 'normal'
                   }
                 ]}>
                   {size}
@@ -92,7 +96,7 @@ const AppSettingsScreen: React.FC = () => {
           <View style={styles.buttonGroup}>
             {difficulties.map((difficulty) => {
               const isSelected = selectedDifficulty === difficulty;
-              const diffColors = difficultyColors[difficulty as keyof typeof difficultyColors];
+              const diffColors = difficultyColors[difficulty];
               
               return (
                 <TouchableOpacity
@@ -103,7 +107,7 @@ const AppSettingsScreen: React.FC = () => {
                       ? { backgroundColor: diffColors.bg } 
                       : { backgroundColor: `${diffColors.bg}30` }
                   ]}
-                  onPress={() => setSelectedDifficulty(difficulty as Difficulty)}
+                  onPress={() => setSelectedDifficulty(difficulty)}
                 >
                   {isSelected && (
                     <View style={[styles.checkmark, { backgroundColor: colors.text }]}>
@@ -114,7 +118,7 @@ const AppSettingsScreen: React.FC = () => {
                     styles.optionButtonText,
                     { 
                       color: isSelected ? diffColors.text : colors.text,
-                      fontWeight: isSelected ? "bold" : "normal"
+                      fontWeight: isSelected ? 'bold' : 'normal'
                     }
                   ]}>
                     {difficulty}
@@ -160,7 +164,7 @@ const AppSettingsScreen: React.FC = () => {
                     styles.themeButtonText,
                     { 
                       color: themeColors.text,
-                      fontWeight: isSelected ? "bold" : "normal"
+                      fontWeight: isSelected ? 'bold' : 'normal'
                     }
                   ]}>
                     {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -218,6 +222,18 @@ const AppSettingsScreen: React.FC = () => {
             </View>
           </View>
         </View>
+
+        {/* FOOTER WITH LOGO */}
+        <View style={styles.footer}>
+          <View style={[styles.footerLogoContainer, { borderTopColor: colors.text }]}>
+            <Text style={[styles.footerLogo, { color: colors.text }]}>🦓</Text>
+            <Text style={[styles.footerLogoText, { color: colors.text }]}>Zoo-Tiles</Text>
+          </View>
+          <Text style={[styles.footerVersion, { color: colors.text }]}>Version 1.0.0</Text>
+          <Text style={[styles.footerTagline, { color: colors.text }]}>
+            Animal-themed puzzle fun for everyone!
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -233,16 +249,16 @@ const styles = StyleSheet.create({
   },
   header: {
     fontSize: 28,
-    fontWeight: "bold",
+    fontWeight: 'bold',
     marginBottom: 30,
-    textAlign: "center",
+    textAlign: 'center',
   },
   section: {
     marginBottom: 30,
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: "bold",
+    fontWeight: 'bold',
     marginBottom: 5,
   },
   sectionSubtitle: {
@@ -251,79 +267,79 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   buttonGroup: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   optionButton: {
-    width: "48%",
+    width: '48%',
     paddingVertical: 16,
     borderRadius: 12,
-    alignItems: "center",
+    alignItems: 'center',
     marginBottom: 12,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    position: "relative",
+    position: 'relative',
   },
   optionButtonText: {
     fontSize: 16,
   },
   checkmark: {
-    position: "absolute",
+    position: 'absolute',
     top: 8,
     right: 8,
     width: 24,
     height: 24,
     borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   checkmarkText: {
-    fontWeight: "bold",
+    fontWeight: 'bold',
     fontSize: 16,
   },
   themeGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   themeButton: {
-    width: "48%",
+    width: '48%',
     padding: 15,
     borderRadius: 12,
-    alignItems: "center",
+    alignItems: 'center',
     marginBottom: 15,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    position: "relative",
+    position: 'relative',
   },
   selectedThemeButton: {
     borderWidth: 3,
-    borderColor: "#fff",
+    borderColor: '#fff',
   },
   themeCheckmark: {
-    position: "absolute",
+    position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: "#fff",
+    backgroundColor: '#fff',
     width: 24,
     height: 24,
     borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   themeCheckmarkText: {
-    fontWeight: "bold",
+    fontWeight: 'bold',
     fontSize: 16,
   },
   themePreview: {
-    flexDirection: "row",
+    flexDirection: 'row',
     marginBottom: 10,
   },
   themeColorSample: {
@@ -338,10 +354,10 @@ const styles = StyleSheet.create({
   saveButton: {
     paddingVertical: 18,
     borderRadius: 14,
-    alignItems: "center",
+    alignItems: 'center',
     marginTop: 10,
     marginBottom: 30,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -349,55 +365,89 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: 'bold',
   },
   summaryCard: {
     padding: 20,
     borderRadius: 15,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 4,
+    marginBottom: 30,
   },
   summaryTitle: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: 'bold',
     marginBottom: 15,
-    textAlign: "center",
+    textAlign: 'center',
   },
   summaryRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 10,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.1)",
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   summaryLabel: {
     fontSize: 16,
-    fontWeight: "500",
+    fontWeight: '500',
   },
   summaryValueContainer: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   summaryValue: {
     fontSize: 16,
-    fontWeight: "bold",
+    fontWeight: 'bold',
     marginRight: 8,
   },
   smallCheckmark: {
     width: 20,
     height: 20,
     borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   smallCheckmarkText: {
     fontSize: 12,
-    fontWeight: "bold",
+    fontWeight: 'bold',
+  },
+  footer: {
+    marginTop: 30,
+    alignItems: 'center',
+    paddingTop: 20,
+  },
+  footerLogoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 20,
+    borderTopWidth: 1,
+    width: '100%',
+  },
+  footerLogo: {
+    fontSize: 36,
+    marginRight: 10,
+  },
+  footerLogoText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  footerVersion: {
+    fontSize: 14,
+    marginTop: 10,
+    opacity: 0.7,
+  },
+  footerTagline: {
+    fontSize: 16,
+    marginTop: 5,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    opacity: 0.8,
   },
 });
 

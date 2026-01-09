@@ -1,15 +1,23 @@
-// App.tsx
-import React from "react";
-import { ThemeProvider } from "./src/context/ThemeContext";
-import { ProfileProvider } from "./src/context/ProfileContext"; // Add this
-import AppNavigator from "./src/navigation/AppNavigator";
+// App.tsx or similar
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { ThemeProvider } from './src/context/ThemeContext';
+import { SettingsProvider } from './src/context/SettingsContext';
+import { ProfileProvider } from './src/context/ProfileContext';
+import AppNavigator from './src/navigation/AppNavigator';
 
-export default function App() {
+const App: React.FC = () => {
   return (
-    <ThemeProvider>
-      <ProfileProvider> {/* Wrap with ProfileProvider */}
-        <AppNavigator />
-      </ProfileProvider>
-    </ThemeProvider>
+    <SettingsProvider>
+      <ThemeProvider>
+        <ProfileProvider>
+          <NavigationContainer>
+            <AppNavigator />
+          </NavigationContainer>
+        </ProfileProvider>
+      </ThemeProvider>
+    </SettingsProvider>
   );
-}
+};
+
+export default App;
