@@ -8,9 +8,11 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { ThemeContext, themeStyles } from '../context/ThemeContext';
+import { getDailyPuzzle, getWeeklyPuzzle, getSequentialPuzzle } from '../services/api';
 
 // Define the route params type
 type RootStackParamList = {
@@ -24,14 +26,8 @@ type RootStackParamList = {
 
 type PlayScreenRouteProp = RouteProp<RootStackParamList, 'Play'>;
 
-// API response types
-interface PuzzleData {
-  id: string;
-  gridSize: number;
-  puzzle: string[][]; // Puzzle with null/empty for empty cells
-  solution: string[][]; // Complete solution
-  difficulty: string;
-}
+// Get screen dimensions for responsive sizing
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const PlayScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -56,9 +52,30 @@ const PlayScreen: React.FC = () => {
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
   const [moves, setMoves] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  const [animalOptions, setAnimalOptions] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
   
-  // Animal emojis
-  const animalEmojis = ['🐘', '🦒', '🦁', '🐯', '🐼', '🐬', '🦓', '🦍', '🐧'];
+  // Calculate fixed grid size that fits on screen
+  const getFixedGridDimensions = () => {
+    // Reserve space for header, animal selector, and controls
+    const headerHeight = 80;
+    const animalSelectorHeight = 120;
+    const controlsHeight = 80;
+    const padding = 40;
+    
+    const availableHeight = screenHeight - headerHeight - animalSelectorHeight - controlsHeight - padding;
+    const availableWidth = screenWidth - 40; // 20 padding on each side
+    
+    // Use the smaller dimension to ensure grid fits
+    const maxGridSize = Math.min(availableHeight, availableWidth);
+    
+    return {
+      containerSize: maxGridSize,
+      cellSize: Math.floor(maxGridSize / gridSize)
+    };
+  };
+  
+  const { containerSize, cellSize } = getFixedGridDimensions();
   
   // Fetch puzzle from API
   useEffect(() => {
@@ -68,45 +85,73 @@ const PlayScreen: React.FC = () => {
   const fetchPuzzle = async () => {
     try {
       setLoading(true);
+      setError(null);
       
-      // TODO: Replace with your actual API endpoint
-      let apiUrl = `https://your-api.com/puzzles?size=${gridSize}&difficulty=${difficultyParam}`;
+      let apiResponse;
       
-      if (challengeId) {
-        apiUrl = `https://your-api.com/challenges/${challengeId}`;
-      } else if (challengeType === 'daily') {
-        apiUrl = `https://your-api.com/puzzles/daily`;
+      // Determine which API endpoint to call
+      if (challengeType === 'daily') {
+        // Fetch daily puzzle for the specified grid size
+        apiResponse = await getDailyPuzzle(gridSize);
       } else if (challengeType === 'weekly') {
-        apiUrl = `https://your-api.com/puzzles/weekly`;
+        // Fetch weekly puzzle for the specified grid size
+        apiResponse = await getWeeklyPuzzle(gridSize);
+      } else {
+        // Fetch sequential puzzle by difficulty for the specified grid size
+        const difficulty = difficultyParam.toLowerCase() as 'easy' | 'medium' | 'hard' | 'expert';
+        apiResponse = await getSequentialPuzzle(gridSize, difficulty);
       }
       
-      // For now, create a mock puzzle until you connect to real API
-      const mockPuzzle = createMockPuzzle(gridSize, difficultyParam);
+      if (!apiResponse || !apiResponse.puzzle) {
+        throw new Error('No puzzle data received from API');
+      }
       
-      setPuzzle(mockPuzzle.puzzle);
-      setSolution(mockPuzzle.solution);
-      setUserGrid(mockPuzzle.puzzle.map(row => [...row])); // Deep copy
+      const puzzleData = apiResponse.puzzle;
+      
+      // Validate the puzzle data
+      if (!Array.isArray(puzzleData.puzzle) || !Array.isArray(puzzleData.solution)) {
+        throw new Error('Invalid puzzle data structure');
+      }
+      
+      // Set the puzzle data
+      setPuzzle(puzzleData.puzzle);
+      setSolution(puzzleData.solution);
+      setAnimalOptions(puzzleData.contents || getDefaultAnimals(gridSize));
+      
+      // Initialize user grid with empty cells where puzzle has empty strings
+      const initialUserGrid = puzzleData.puzzle.map(row => 
+        row.map(cell => cell || '')
+      );
+      setUserGrid(initialUserGrid);
+      
       setMoves(0);
       setIsComplete(false);
       setSelectedCell(null);
       
     } catch (error) {
       console.error('Error fetching puzzle:', error);
-      Alert.alert('Error', 'Failed to load puzzle. Using fallback puzzle.');
+      setError('Failed to load puzzle. Using fallback puzzle.');
       
       // Fallback to mock puzzle
       const mockPuzzle = createMockPuzzle(gridSize, difficultyParam);
       setPuzzle(mockPuzzle.puzzle);
       setSolution(mockPuzzle.solution);
       setUserGrid(mockPuzzle.puzzle.map(row => [...row]));
+      setAnimalOptions(mockPuzzle.animals);
     } finally {
       setLoading(false);
     }
   };
   
-  // Mock puzzle generator (remove this when using real API)
+  // Get default animals based on grid size
+  const getDefaultAnimals = (size: number): string[] => {
+    const allAnimals = ['🐶', '🐱', '🐭', '🐰', '🦊', '🐻', '🐼', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🦄', '🐉'];
+    return allAnimals.slice(0, size);
+  };
+  
+  // Mock puzzle generator (fallback if API fails)
   const createMockPuzzle = (size: number, difficulty: string) => {
-    const animals = animalEmojis.slice(0, Math.min(size, animalEmojis.length));
+    const animals = getDefaultAnimals(size);
     
     // Create a simple pattern
     const puzzle: string[][] = [];
@@ -120,15 +165,15 @@ const PlayScreen: React.FC = () => {
         solution[i][j] = animal;
         
         // Remove cells based on difficulty
-        const removeChance = difficulty === 'Easy' ? 0.3 : 
-                            difficulty === 'Medium' ? 0.5 :
-                            difficulty === 'Hard' ? 0.7 : 0.8;
+        const removeChance = difficulty.toLowerCase() === 'easy' ? 0.3 : 
+                            difficulty.toLowerCase() === 'medium' ? 0.5 :
+                            difficulty.toLowerCase() === 'hard' ? 0.7 : 0.8;
         
         puzzle[i][j] = Math.random() > removeChance ? animal : '';
       }
     }
     
-    return { puzzle, solution };
+    return { puzzle, solution, animals };
   };
   
   const handleCellPress = (row: number, col: number) => {
@@ -288,8 +333,11 @@ const PlayScreen: React.FC = () => {
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.text} />
           <Text style={[styles.loadingText, { color: colors.text }]}>
-            Loading Puzzle...
+            Loading {gridSize}x{gridSize} Puzzle...
           </Text>
+          {error && (
+            <Text style={[styles.errorText, { color: '#FF9800' }]}>{error}</Text>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -297,7 +345,7 @@ const PlayScreen: React.FC = () => {
   
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={handleBack} style={styles.backButton}>
@@ -322,8 +370,31 @@ const PlayScreen: React.FC = () => {
           </View>
         </View>
         
-        {/* Game Grid */}
-        <View style={styles.gridContainer}>
+        {/* Error message */}
+        {error && (
+          <View style={[styles.errorContainer, { backgroundColor: '#FF980020' }]}>
+            <Text style={[styles.errorText, { color: '#FF9800' }]}>{error}</Text>
+          </View>
+        )}
+        
+        {/* ✅ FIXED: Selected Cell Info - MOVED BEFORE GRID */}
+        {selectedCell && (
+          <View style={[styles.selectedInfo, { backgroundColor: colors.button }]}>
+            <Text style={[styles.selectedText, { color: colors.text }]}>
+              Selected: Row {selectedCell[0] + 1}, Col {selectedCell[1] + 1}
+            </Text>
+            <TouchableOpacity onPress={handleClearCell} style={styles.clearButton}>
+              <Text style={styles.clearButtonText}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        
+        {/* Game Grid - FIXED SIZE */}
+        <View style={[styles.gridContainer, { 
+          width: containerSize, 
+          height: containerSize,
+          alignSelf: 'center' // ✅ FIXED: Center the grid
+        }]}>
           {userGrid.map((row, rowIndex) => (
             <View key={rowIndex} style={styles.row}>
               {row.map((cell, colIndex) => {
@@ -337,6 +408,8 @@ const PlayScreen: React.FC = () => {
                     style={[
                       styles.cell,
                       {
+                        width: cellSize,
+                        height: cellSize,
                         backgroundColor: isSelected ? '#2196F330' : 
                                         isOriginal ? colors.button + '80' : colors.button,
                         borderColor: isSelected ? '#2196F3' : colors.text + '30',
@@ -349,7 +422,8 @@ const PlayScreen: React.FC = () => {
                     <Text style={[
                       styles.cellText,
                       { 
-                        color: isCorrect || isOriginal ? colors.text : '#F44336'
+                        color: isCorrect || isOriginal ? colors.text : '#F44336',
+                        fontSize: getFontSizeForGrid(gridSize, cellSize)
                       }
                     ]}>
                       {cell || ''}
@@ -361,38 +435,38 @@ const PlayScreen: React.FC = () => {
           ))}
         </View>
         
-        {/* Selected Cell Info */}
-        {selectedCell && (
-          <View style={[styles.selectedInfo, { backgroundColor: colors.button }]}>
-            <Text style={[styles.selectedText, { color: colors.text }]}>
-              Selected: Row {selectedCell[0] + 1}, Col {selectedCell[1] + 1}
-            </Text>
-            <TouchableOpacity onPress={handleClearCell} style={styles.clearButton}>
-              <Text style={styles.clearButtonText}>Clear</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        
-        {/* Animal Selector */}
+        {/* Animal Selector - FIXED: Center aligned */}
         <View style={styles.selectorContainer}>
           <Text style={[styles.selectorTitle, { color: colors.text }]}>
-            Select Animal:
+            Select Animal ({gridSize} animals):
           </Text>
-          <View style={styles.animalGrid}>
-            {animalEmojis.slice(0, gridSize).map((emoji, index) => (
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.animalScrollContent}
+          >
+            {animalOptions.slice(0, gridSize).map((emoji, index) => (
               <TouchableOpacity
                 key={index}
-                style={[styles.animalButton, { backgroundColor: colors.button }]}
+                style={[
+                  styles.animalButton, 
+                  { 
+                    backgroundColor: colors.button,
+                    marginHorizontal: 6, // ✅ FIXED: Proper spacing
+                  }
+                ]}
                 onPress={() => handleValueSelect(emoji)}
                 disabled={!selectedCell || isComplete}
               >
-                <Text style={styles.animalText}>{emoji}</Text>
+                <Text style={styles.animalText}>
+                  {emoji}
+                </Text>
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
         </View>
         
-        {/* Controls */}
+        {/* Controls - FIXED: Better spacing */}
         <View style={styles.controls}>
           <TouchableOpacity
             style={[styles.controlButton, { backgroundColor: '#FF9800' }]}
@@ -426,7 +500,7 @@ const PlayScreen: React.FC = () => {
           <Text style={[styles.instructionsText, { color: colors.text }]}>
             • Tap empty cells to select them{'\n'}
             • Select an animal to fill the cell{'\n'}
-            • Fill all cells to complete the puzzle{'\n'}
+            • Each row, column, and {getBoxSize(gridSize)}x{getBoxSize(gridSize)} box must have all animals{'\n'}
             • Hint shows the correct animal for selected cell
           </Text>
         </View>
@@ -435,9 +509,30 @@ const PlayScreen: React.FC = () => {
   );
 };
 
+// Helper functions
+const getBoxSize = (gridSize: number): number => {
+  if (gridSize === 6) return 3;
+  if (gridSize === 8) return 4;
+  if (gridSize === 10) return 5;
+  if (gridSize === 12) return 4;
+  return Math.sqrt(gridSize);
+};
+
+const getFontSizeForGrid = (gridSize: number, cellSize: number): number => {
+  // Base font size on cell size
+  if (cellSize < 30) return 14;
+  if (cellSize < 40) return 16;
+  if (cellSize < 50) return 18;
+  return 20;
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
   },
   centered: {
     flex: 1,
@@ -448,18 +543,30 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
   },
+  errorText: {
+    marginTop: 8,
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  errorContainer: {
+    marginHorizontal: 20,
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#DDD',
+    paddingTop: 10,
   },
   backButton: {
     padding: 8,
   },
   backButtonText: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
   },
   headerCenter: {
@@ -467,7 +574,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
   },
   difficulty: {
@@ -475,9 +582,9 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   challengeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
     marginTop: 4,
   },
   challengeText: {
@@ -489,34 +596,16 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   movesText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
-  gridContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  row: {
-    flexDirection: 'row',
-  },
-  cell: {
-    width: 50,
-    height: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-    margin: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  cellText: {
-    fontSize: 24,
-  },
+  // ✅ FIXED: Selected Cell Info styles
   selectedInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginHorizontal: 20,
-    marginBottom: 16,
+    marginVertical: 10,
     padding: 12,
     borderRadius: 8,
   },
@@ -525,18 +614,38 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   clearButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     backgroundColor: '#F44336',
     borderRadius: 6,
   },
   clearButtonText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
+  gridContainer: {
+    marginVertical: 10,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderRadius: 8,
+    padding: 4,
+  },
+  row: {
+    flexDirection: 'row',
+  },
+  cell: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    margin: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  cellText: {
+    fontWeight: 'bold',
+  },
   selectorContainer: {
-    padding: 20,
+    marginTop: 10,
+    marginHorizontal: 20,
   },
   selectorTitle: {
     fontSize: 16,
@@ -544,29 +653,29 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: 'center',
   },
-  animalGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  animalScrollContent: {
+    paddingVertical: 10,
     justifyContent: 'center',
   },
   animalButton: {
-    width: 60,
-    height: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    margin: 6,
-    borderRadius: 10,
+    width: 60,
+    height: 60,
+    borderRadius: 12,
   },
   animalText: {
-    fontSize: 30,
+    fontSize: 32,
+    fontWeight: 'bold',
   },
   controls: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    padding: 20,
+    marginHorizontal: 20,
+    marginVertical: 15,
   },
   controlButton: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 10,
     minWidth: 100,
@@ -579,7 +688,7 @@ const styles = StyleSheet.create({
   },
   instructions: {
     marginHorizontal: 20,
-    marginBottom: 30,
+    marginBottom: 20,
     padding: 16,
     borderRadius: 10,
   },

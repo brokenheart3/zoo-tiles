@@ -30,7 +30,7 @@ const StatsSummary: React.FC<StatsSummaryProps> = ({
         </View>
         <View style={styles.statItem}>
           <Text style={[styles.statNumber, { color: themeColors.text }]}>
-            {stats?.accuracy || 0}%
+            {stats?.accuracy || 0}
           </Text>
           <Text style={[styles.statLabel, { color: themeColors.text }]}>Accuracy</Text>
         </View>

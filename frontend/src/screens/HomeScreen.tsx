@@ -13,7 +13,7 @@ import { ThemeContext, themeStyles } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { useProfile } from '../context/ProfileContext';
 
-// Import homescreen components using barrel export
+// Import homescreen components
 import {
   GreetingHeader,
   ChallengeCard,
@@ -23,9 +23,12 @@ import {
   StatsSummary,
   SettingsLink,
 } from '../components/homescreen';
-
-// Import common footer component
 import { AppFooter } from '../components/common';
+
+// Import services
+import { getChallengePlayerCount } from '../services/simpleChallengeService';
+import { getTimeRemaining, getWeekNumber } from '../utils/timeUtils';
+import { getRandomFact, checkHealth } from '../services/api';
 
 // Navigation types
 type RootStackParamList = {
@@ -73,32 +76,43 @@ const DEFAULT_SETTINGS = {
   difficulty: 'Medium' as const,
 };
 
-// Animal facts
-const ANIMAL_FACTS = [
-  '🐘 Elephants have the longest pregnancy—nearly 22 months!',
-  '🦒 Giraffes only need 5-30 minutes of sleep per day!',
-  '🦁 A lion\'s roar can be heard from 5 miles away.',
-  '🐯 Tiger stripes are unique like fingerprints.',
-  '🐼 Pandas spend 14 hours a day eating bamboo.',
-  '🐬 Dolphins have names for each other.',
-  '🦓 A zebra\'s stripes are as unique as fingerprints.',
-  '🦍 Gorillas can catch human colds.',
-  '🐧 Penguins propose with pebbles.',
-  '🦉 Owls can rotate necks 270 degrees.',
-  '🦥 Sloths come down from trees once a week.',
-  '🦘 Kangaroos can\'t walk backwards.',
-  '🦊 Foxes use Earth\'s magnetic field to hunt.',
-  '🐝 Honey bees communicate by dancing.',
-  '🦋 Butterflies taste with their feet.',
-];
+// Helper to check if daily challenge is urgent
+const isDailyChallengeUrgent = (timeString: string): boolean => {
+  if (!timeString || timeString.includes('Loading')) return false;
+  if (timeString.includes('Expired')) return true;
+  
+  const hasHours = timeString.includes('h');
+  const hasDays = timeString.includes('d');
+  
+  if (hasDays) {
+    const daysMatch = timeString.match(/(\d+)d/);
+    if (daysMatch && parseInt(daysMatch[1]) === 0) return true;
+  } else if (hasHours) {
+    const hoursMatch = timeString.match(/(\d+)h/);
+    if (hoursMatch && parseInt(hoursMatch[1]) === 0) return true;
+  } else {
+    return true; // Only minutes and seconds remaining
+  }
+  
+  return false;
+};
 
-// Get today's animal fact
-const getFactOfTheDay = (): string => {
-  const today = new Date();
-  const dayOfYear = Math.floor(
-    (today.getTime() - new Date(today.getFullYear(), 0, 0).getTime()) / 86400000
-  );
-  return ANIMAL_FACTS[dayOfYear % ANIMAL_FACTS.length];
+// Helper to check if weekly challenge is urgent
+const isWeeklyChallengeUrgent = (timeString: string): boolean => {
+  if (!timeString || timeString.includes('Loading')) return false;
+  if (timeString.includes('Expired')) return true;
+  
+  const daysMatch = timeString.match(/(\d+)d/);
+  if (daysMatch) {
+    const days = parseInt(daysMatch[1]);
+    if (days === 0) return true;
+    if (days === 1) {
+      const hoursMatch = timeString.match(/(\d+)h/);
+      if (hoursMatch && parseInt(hoursMatch[1]) < 12) return true;
+    }
+  }
+  
+  return false;
 };
 
 const HomeScreen: React.FC = () => {
@@ -109,58 +123,222 @@ const HomeScreen: React.FC = () => {
   
   const colors = themeStyles[theme];
   
-  // Check if user has customized settings
+  // State for user settings
   const [hasCustomSettings, setHasCustomSettings] = useState(false);
   
-  // Use settings or defaults
+  // State for animal fact
+  const [factData, setFactData] = useState<{
+    displayFact: string;
+    animalName: string;
+    progress: string;
+    loading: boolean;
+    error?: string;
+  }>({
+    displayFact: 'Loading animal fact...',
+    animalName: '',
+    progress: '',
+    loading: true,
+  });
+  
+  // State for challenge data
+  const [dailyChallengeData, setDailyChallengeData] = useState({
+    remainingTime: 'Loading...',
+    playerCount: 0,
+    loading: true
+  });
+  
+  const [weeklyChallengeData, setWeeklyChallengeData] = useState({
+    remainingTime: 'Loading...',
+    playerCount: 0,
+    loading: true
+  });
+
+  // Current settings
   const currentGridSize = settings.gridSize || DEFAULT_SETTINGS.gridSize;
   const currentDifficulty = settings.difficulty || DEFAULT_SETTINGS.difficulty;
-  
-  // Get current grid size properties
   const gridProperties = GRID_SIZE_PROPERTIES[currentGridSize];
-  
-  // State for animal fact
-  const [animalFact, setAnimalFact] = useState<string>('');
-  
-  // State for challenge timers
-  const [dailyTimer] = useState('14:22:05');
-  const [weeklyTimer] = useState('4 days, 6:45:12');
 
-  // Check settings on mount
-  useEffect(() => {
-    checkUserSettings();
-    loadAnimalFact();
-  }, []);
-
-  const checkUserSettings = async () => {
+  // Load animal fact from API
+  const loadAnimalFact = async (forceRefresh: boolean = false) => {
     try {
-      const hasChangedSettings = await AsyncStorage.getItem('hasChangedSettings');
-      setHasCustomSettings(hasChangedSettings === 'true');
-    } catch (error) {
-      console.error('Error checking settings:', error);
-    }
-  };
-
-  const loadAnimalFact = async () => {
-    try {
+      setFactData(prev => ({ ...prev, loading: true }));
+      
       const today = new Date().toDateString();
       const storedDate = await AsyncStorage.getItem('lastFactDate');
-      const storedFact = await AsyncStorage.getItem('dailyFact');
+      const storedFactData = await AsyncStorage.getItem('dailyFactData');
       
-      if (storedDate === today && storedFact) {
-        setAnimalFact(storedFact);
-      } else {
-        const newFact = getFactOfTheDay();
-        setAnimalFact(newFact);
-        
-        await AsyncStorage.setItem('lastFactDate', today);
-        await AsyncStorage.setItem('dailyFact', newFact);
+      // Check if we have today's fact and not forcing refresh
+      if (!forceRefresh && storedDate === today && storedFactData) {
+        const parsedData = JSON.parse(storedFactData);
+        setFactData({
+          displayFact: parsedData.displayFact,
+          animalName: parsedData.animalName,
+          progress: parsedData.progress || '',
+          loading: false,
+        });
+        return;
       }
+      
+      // Try to get random fact from API
+      const response = await getRandomFact();
+      
+      if (response.success && response.fact) {
+        const displayFact = response.fact;
+        
+        // Extract animal name
+        let animalName = '';
+        if (response.animal?.name) {
+          animalName = response.animal.name;
+        } else if (response.animalName) {
+          animalName = response.animalName;
+        } else if (response.animal?.emoji) {
+          animalName = response.animal.emoji;
+        } else {
+          // Try to extract from fact text
+          const animalMatch = displayFact.match(/[A-Z][a-z]+/);
+          animalName = animalMatch ? animalMatch[0] : 'Animal';
+        }
+        
+        const progress = response.totalFacts ? 
+          `Fact ${response.index || 1} of ${response.totalFacts}` : 
+          'Daily animal fact';
+        
+        // Save to storage
+        await AsyncStorage.setItem('lastFactDate', today);
+        await AsyncStorage.setItem('dailyFactData', JSON.stringify({
+          displayFact,
+          animalName,
+          progress,
+          rawFact: response.fact,
+          fetchedAt: new Date().toISOString(),
+        }));
+        
+        setFactData({
+          displayFact,
+          animalName,
+          progress,
+          loading: false,
+        });
+        
+      } else {
+        throw new Error('No fact received from API');
+      }
+      
     } catch (error) {
       console.error('Error loading animal fact:', error);
-      setAnimalFact(getFactOfTheDay());
+      
+      // Simple fallback
+      const fallbackFacts = [
+        "Discover amazing animal facts in the Zoo-Tiles game!",
+        "Learn interesting facts about animals as you play puzzles!",
+        "Animal facts refresh daily. Come back tomorrow for more!"
+      ];
+      
+      const randomIndex = Math.floor(Math.random() * fallbackFacts.length);
+      
+      setFactData({
+        displayFact: fallbackFacts[randomIndex],
+        animalName: '',
+        progress: 'API unavailable',
+        loading: false,
+        error: 'Failed to fetch fact',
+      });
     }
   };
+
+  // Clear stored facts manually
+  const clearStoredFacts = async () => {
+    try {
+      await AsyncStorage.removeItem('lastFactDate');
+      await AsyncStorage.removeItem('dailyFactData');
+      console.log('Stored facts cleared');
+      // Reload fact
+      await loadAnimalFact(true);
+    } catch (error) {
+      console.error('Error clearing stored facts:', error);
+    }
+  };
+
+  // Load challenge data (player counts and timers)
+  const loadChallengeData = async () => {
+    try {
+      // Load daily challenge data
+      const dailyPlayerCount = await getChallengePlayerCount('daily');
+      const dailyTimeRemaining = getTimeRemaining('daily');
+      
+      setDailyChallengeData({
+        remainingTime: dailyTimeRemaining,
+        playerCount: dailyPlayerCount,
+        loading: false
+      });
+
+      // Load weekly challenge data
+      const weeklyPlayerCount = await getChallengePlayerCount('weekly');
+      const weeklyTimeRemaining = getTimeRemaining('weekly');
+      
+      setWeeklyChallengeData({
+        remainingTime: weeklyTimeRemaining,
+        playerCount: weeklyPlayerCount,
+        loading: false
+      });
+    } catch (error) {
+      console.error('Error loading challenge data:', error);
+      // Fallback to placeholder data
+      setDailyChallengeData({
+        remainingTime: 'Error loading',
+        playerCount: 2456,
+        loading: false
+      });
+      setWeeklyChallengeData({
+        remainingTime: 'Error loading',
+        playerCount: 8921,
+        loading: false
+      });
+    }
+  };
+
+  // Update timers every second and refresh data periodically
+  useEffect(() => {
+    loadChallengeData();
+    loadAnimalFact();
+    
+    // Update timers every second
+    const timerInterval = setInterval(() => {
+      setDailyChallengeData(prev => ({
+        ...prev,
+        remainingTime: getTimeRemaining('daily')
+      }));
+      
+      setWeeklyChallengeData(prev => ({
+        ...prev,
+        remainingTime: getTimeRemaining('weekly')
+      }));
+    }, 1000);
+
+    // Refresh player counts every 30 seconds
+    const dataRefreshInterval = setInterval(() => {
+      loadChallengeData();
+    }, 30000);
+
+    return () => {
+      clearInterval(timerInterval);
+      clearInterval(dataRefreshInterval);
+    };
+  }, []);
+
+  // Check user settings on mount
+  useEffect(() => {
+    const checkUserSettings = async () => {
+      try {
+        const hasChangedSettings = await AsyncStorage.getItem('hasChangedSettings');
+        setHasCustomSettings(hasChangedSettings === 'true');
+      } catch (error) {
+        console.error('Error checking settings:', error);
+      }
+    };
+    
+    checkUserSettings();
+  }, []);
 
   // Smart greeting logic
   const getGreeting = () => {
@@ -222,23 +400,26 @@ const HomeScreen: React.FC = () => {
 
   const greetingData = getGreeting();
   
-  // Challenge data
+  // Challenge data with real values
   const dailyChallenge = {
     title: 'Daily Jungle Adventure',
     description: `Complete today's special ${currentGridSize} puzzle with jungle animals`,
-    remainingTime: dailyTimer,
-    players: '2,456',
+    remainingTime: dailyChallengeData.remainingTime,
+    players: dailyChallengeData.playerCount.toLocaleString(),
     emoji: '🐅',
-    progress: undefined,
+    loading: dailyChallengeData.loading,
+    isUrgent: isDailyChallengeUrgent(dailyChallengeData.remainingTime),
   };
   
   const weeklyChallenge = {
     title: 'Weekly Safari Expedition',
     description: `A special ${currentGridSize} puzzle available all week`,
-    remainingTime: weeklyTimer,
-    players: '8,921',
+    remainingTime: weeklyChallengeData.remainingTime,
+    players: weeklyChallengeData.playerCount.toLocaleString(),
     emoji: '🦓',
-    progress: '3/10',
+    progress: '0/10',
+    loading: weeklyChallengeData.loading,
+    isUrgent: isWeeklyChallengeUrgent(weeklyChallengeData.remainingTime),
   };
 
   // Navigation handlers
@@ -258,27 +439,55 @@ const HomeScreen: React.FC = () => {
   };
 
   const handlePlayDailyChallenge = () => {
-    navigation.navigate('Play', {
-      gridSize: currentGridSize,
-      difficulty: 'Expert',
-      challengeType: 'daily',
-      challengeId: `daily-${new Date().toISOString().split('T')[0]}`,
-    });
+    if (!dailyChallenge.remainingTime.includes('Expired')) {
+      navigation.navigate('Play', {
+        gridSize: currentGridSize,
+        difficulty: 'Expert',
+        challengeType: 'daily',
+        challengeId: `daily-${new Date().toISOString().split('T')[0]}`,
+      });
+    }
   };
 
   const handlePlayWeeklyChallenge = () => {
-    navigation.navigate('Play', {
-      gridSize: currentGridSize,
-      difficulty: 'Expert',
-      challengeType: 'weekly',
-      challengeId: `weekly-${getWeekNumber(new Date())}`,
-    });
+    if (!weeklyChallenge.remainingTime.includes('Expired')) {
+      navigation.navigate('Play', {
+        gridSize: currentGridSize,
+        difficulty: 'Expert',
+        challengeType: 'weekly',
+        challengeId: `weekly-${getWeekNumber(new Date())}`,
+      });
+    }
   };
 
-  const getWeekNumber = (date: Date): string => {
-    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
-    const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
-    return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7).toString();
+  // Refresh fact manually
+  const handleRefreshFact = async () => {
+    await loadAnimalFact(true);
+  };
+
+  // Get fresh stats for new users (all zeros)
+  const getFreshStats = () => {
+    return {
+      puzzlesSolved: 0,
+      accuracy: 0,
+      currentStreak: 0,
+      totalPlayTime: 0,
+      bestTime: 0,
+      averageTime: 0,
+      challengesCompleted: 0,
+      perfectGames: 0
+    };
+  };
+
+  // Get achievements for new users (all locked)
+  const getFreshTrophies = () => {
+    return [
+      { id: 1, name: 'First Puzzle', description: 'Complete your first puzzle', unlocked: false, icon: '🏆' },
+      { id: 2, name: 'Quick Solver', description: 'Solve a puzzle in under 5 minutes', unlocked: false, icon: '⚡'},
+      { id: 3, name: 'Accuracy Master', description: 'Achieve 100% accuracy on any puzzle', unlocked: false, icon: '🎯' },
+      { id: 4, name: 'Daily Streak', description: 'Complete 3 daily challenges in a row', unlocked: false, icon: '🔥' },
+      { id: 5, name: 'Weekly Warrior', description: 'Complete a weekly challenge', unlocked: false, icon: '🛡️' },
+    ];
   };
 
   return (
@@ -304,9 +513,11 @@ const HomeScreen: React.FC = () => {
           title={dailyChallenge.title}
           description={dailyChallenge.description}
           remainingTime={dailyChallenge.remainingTime}
-          players={dailyChallenge.players}
+          players={dailyChallenge.loading ? 'Loading...' : dailyChallenge.players}
           emoji={dailyChallenge.emoji}
           themeColors={colors}
+          isUrgent={dailyChallenge.isUrgent}
+          isLoading={dailyChallenge.loading}
           onPress={handleDailyChallengePress}
           onPlayPress={handlePlayDailyChallenge}
           challengeColors={CHALLENGE_COLORS}
@@ -319,10 +530,12 @@ const HomeScreen: React.FC = () => {
           title={weeklyChallenge.title}
           description={weeklyChallenge.description}
           remainingTime={weeklyChallenge.remainingTime}
-          players={weeklyChallenge.players}
+          players={weeklyChallenge.loading ? 'Loading...' : weeklyChallenge.players}
           emoji={weeklyChallenge.emoji}
           progress={weeklyChallenge.progress}
           themeColors={colors}
+          isUrgent={weeklyChallenge.isUrgent}
+          isLoading={weeklyChallenge.loading}
           onPress={handleWeeklyChallengePress}
           onPlayPress={handlePlayWeeklyChallenge}
           challengeColors={CHALLENGE_COLORS}
@@ -354,28 +567,91 @@ const HomeScreen: React.FC = () => {
           onPress={() => navigation.navigate('Settings')}
         />
 
-        {/* Animal Fact */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Animal Fact of the Day</Text>
+        {/* ✅ SINGLE Daily Animal Fact Section */}
+        <View style={styles.factSectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+            🐘 Daily Animal Fact
+          </Text>
+          {factData.animalName && !factData.loading && (
+            <Text style={[styles.animalNameBadge, { 
+              color: colors.text, 
+              backgroundColor: colors.button 
+            }]}>
+              {factData.animalName}
+            </Text>
+          )}
+        </View>
+        
         <FactCard
-          fact={animalFact || getFactOfTheDay()}
+          fact={factData.displayFact}
           themeColors={colors}
+          isLoading={factData.loading}
+          onRefresh={handleRefreshFact}
         />
 
         {/* Recent Achievements */}
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Achievements</Text>
         <AchievementsList
-          trophies={profile?.trophies || []}
+          trophies={getFreshTrophies()}
           themeColors={colors}
         />
 
         {/* Stats Summary */}
         <StatsSummary
-          stats={profile?.stats || { puzzlesSolved: 0, accuracy: 0, currentStreak: 0 }}
-          unlockedTrophiesCount={profile?.trophies?.filter(t => t.unlocked).length || 0}
+          stats={getFreshStats()}
+          unlockedTrophiesCount={0}
           themeColors={colors}
         />
 
-        {/* Footer - Using the new AppFooter component */}
+        {/* Challenge Status Summary */}
+        <View style={[styles.statusSummary, { backgroundColor: colors.button }]}>
+          <Text style={[styles.statusTitle, { color: colors.text }]}>
+            📊 Live Challenge Status
+          </Text>
+          <View style={styles.statusGrid}>
+            <View style={styles.statusItem}>
+              <Text style={[styles.statusLabel, { color: colors.text }]}>Daily Players</Text>
+              <Text style={[styles.statusValue, { color: colors.text }]}>
+                {dailyChallenge.loading ? '...' : dailyChallenge.players}
+              </Text>
+            </View>
+            <View style={styles.statusItem}>
+              <Text style={[styles.statusLabel, { color: colors.text }]}>Weekly Players</Text>
+              <Text style={[styles.statusValue, { color: colors.text }]}>
+                {weeklyChallenge.loading ? '...' : weeklyChallenge.players}
+              </Text>
+            </View>
+            <View style={styles.statusItem}>
+              <Text style={[styles.statusLabel, { color: colors.text }]}>Daily Ends In</Text>
+              <Text style={[
+                styles.timerValue, 
+                { 
+                  color: dailyChallenge.isUrgent ? '#FF5722' : colors.text,
+                  fontWeight: dailyChallenge.isUrgent ? 'bold' : 'normal'
+                }
+              ]}>
+                {dailyChallenge.remainingTime}
+              </Text>
+            </View>
+            <View style={styles.statusItem}>
+              <Text style={[styles.statusLabel, { color: colors.text }]}>Weekly Ends In</Text>
+              <Text style={[
+                styles.timerValue, 
+                { 
+                  color: weeklyChallenge.isUrgent ? '#FF5722' : colors.text,
+                  fontWeight: weeklyChallenge.isUrgent ? 'bold' : 'normal'
+                }
+              ]}>
+                {weeklyChallenge.remainingTime}
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.statusNote, { color: colors.text, opacity: 0.7 }]}>
+            Updates every 30 seconds • Times shown in your local timezone
+          </Text>
+        </View>
+
+        {/* Footer */}
         <AppFooter textColor={colors.text} version="1.0.0" />
       </ScrollView>
     </SafeAreaView>
@@ -398,7 +674,61 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 15,
     opacity: 0.8,
-  }
+  },
+  factSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 25,
+    marginBottom: 10,
+  },
+  animalNameBadge: {
+    fontSize: 14,
+    fontWeight: '600',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  // ❌ REMOVED: factInfoContainer, factProgress, factDescription, factActions, etc.
+  statusSummary: {
+    marginHorizontal: 20,
+    marginVertical: 15,
+    padding: 20,
+    borderRadius: 15,
+  },
+  statusTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+  },
+  statusGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  statusItem: {
+    width: '48%',
+    marginBottom: 15,
+  },
+  statusLabel: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginBottom: 5,
+  },
+  statusValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  timerValue: {
+    fontSize: 18,
+  },
+  statusNote: {
+    fontSize: 10,
+    marginTop: 10,
+    textAlign: 'center',
+  },
 });
 
 export default HomeScreen;
