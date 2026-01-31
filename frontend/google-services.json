@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "136934864636",
+    "project_id": "zootiles",
+    "storage_bucket": "zootiles.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:136934864636:android:ac63a08f383cc687538979",
+        "android_client_info": {
+          "package_name": "com.ckayssar1.zootiles"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPFxp83_dEmXMCKU6X0RY84GnuZgCxbnA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

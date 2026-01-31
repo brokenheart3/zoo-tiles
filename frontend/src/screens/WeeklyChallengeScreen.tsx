@@ -14,6 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemeContext, themeStyles } from "../context/ThemeContext";
 import { useSettings } from "../context/SettingsContext";
 import { useProfile } from "../context/ProfileContext";
+import AppFooter from "../components/common/AppFooter"; // <-- Added import
 
 type RootStackParamList = {
   Play: {
@@ -309,6 +310,7 @@ const WeeklyChallengeScreen = () => {
             • Weekly badge for completion
           </Text>
         </View>
+        <AppFooter />  {/* <-- Added footer here */}
       </ScrollView>
     </SafeAreaView>
   );

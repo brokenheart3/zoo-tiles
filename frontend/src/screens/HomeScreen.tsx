@@ -28,7 +28,7 @@ import { AppFooter } from '../components/common';
 // Import services
 import { getChallengePlayerCount } from '../services/simpleChallengeService';
 import { getTimeRemaining, getWeekNumber } from '../utils/timeUtils';
-import { getRandomFact, checkHealth } from '../services/api';
+import { getRandomFact, extractAnimalInfo } from '../services/api';
 
 // Navigation types
 type RootStackParamList = {
@@ -179,25 +179,17 @@ const HomeScreen: React.FC = () => {
         return;
       }
       
-      // Try to get random fact from API
+      // Get random fact from API
       const response = await getRandomFact();
+      console.log('Fact API response:', response);
       
       if (response.success && response.fact) {
         const displayFact = response.fact;
         
-        // Extract animal name
-        let animalName = '';
-        if (response.animal?.name) {
-          animalName = response.animal.name;
-        } else if (response.animalName) {
-          animalName = response.animalName;
-        } else if (response.animal?.emoji) {
-          animalName = response.animal.emoji;
-        } else {
-          // Try to extract from fact text
-          const animalMatch = displayFact.match(/[A-Z][a-z]+/);
-          animalName = animalMatch ? animalMatch[0] : 'Animal';
-        }
+        // Extract animal info using the helper function
+        const animalInfo = extractAnimalInfo(response);
+        const animalName = animalInfo.name;
+        const animalEmoji = animalInfo.emoji || '🐾';
         
         const progress = response.totalFacts ? 
           `Fact ${response.index || 1} of ${response.totalFacts}` : 
@@ -209,6 +201,7 @@ const HomeScreen: React.FC = () => {
           displayFact,
           animalName,
           progress,
+          animalEmoji,
           rawFact: response.fact,
           fetchedAt: new Date().toISOString(),
         }));
@@ -221,27 +214,36 @@ const HomeScreen: React.FC = () => {
         });
         
       } else {
-        throw new Error('No fact received from API');
+        // API returned success: false
+        throw new Error(response.error || 'Failed to load fact from API');
       }
       
-    } catch (error) {
-      console.error('Error loading animal fact:', error);
+    } catch (error: any) {
+      console.error('Error loading animal fact:', error.message);
       
-      // Simple fallback
-      const fallbackFacts = [
-        "Discover amazing animal facts in the Zoo-Tiles game!",
-        "Learn interesting facts about animals as you play puzzles!",
-        "Animal facts refresh daily. Come back tomorrow for more!"
-      ];
+      // Try to use cached fact even if it's old
+      try {
+        const storedFactData = await AsyncStorage.getItem('dailyFactData');
+        if (storedFactData) {
+          const parsedData = JSON.parse(storedFactData);
+          setFactData({
+            displayFact: parsedData.displayFact,
+            animalName: parsedData.animalName,
+            progress: 'Using cached fact',
+            loading: false,
+          });
+          return;
+        }
+      } catch (e) {
+      }
       
-      const randomIndex = Math.floor(Math.random() * fallbackFacts.length);
-      
+      // Show error to user
       setFactData({
-        displayFact: fallbackFacts[randomIndex],
+        displayFact: 'Failed to load animal fact. Please try again.',
         animalName: '',
-        progress: 'API unavailable',
+        progress: 'Error',
         loading: false,
-        error: 'Failed to fetch fact',
+        error: error.message,
       });
     }
   };
@@ -567,7 +569,7 @@ const HomeScreen: React.FC = () => {
           onPress={() => navigation.navigate('Settings')}
         />
 
-        {/* ✅ SINGLE Daily Animal Fact Section */}
+        {/* ✅ SINGLE Daily Animal Fact Section - NO DUPLICATE TITLE */}
         <View style={styles.factSectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
             🐘 Daily Animal Fact
@@ -691,7 +693,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
-  // ❌ REMOVED: factInfoContainer, factProgress, factDescription, factActions, etc.
   statusSummary: {
     marginHorizontal: 20,
     marginVertical: 15,

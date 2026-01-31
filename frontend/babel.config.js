@@ -5,6 +5,14 @@ module.exports = function(api) {
     plugins: [
       "@babel/plugin-proposal-optional-chaining",
       "@babel/plugin-proposal-nullish-coalescing-operator",
+      [
+        "module:react-native-dotenv",
+        {
+          moduleName: "@env",
+          path: ".env",
+          allowUndefined: true
+        }
+      ],
       "react-native-reanimated/plugin" // MUST be last
     ],
   };

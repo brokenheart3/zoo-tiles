@@ -14,6 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemeContext, themeStyles } from "../context/ThemeContext";
 import { useSettings } from "../context/SettingsContext";
 import { useProfile } from "../context/ProfileContext";
+import AppFooter from "../components/common/AppFooter"; // <-- Added import
 
 type RootStackParamList = {
   Play: {
@@ -40,7 +41,6 @@ const DailyChallengeScreen = () => {
     id: 'daily-' + new Date().toISOString().split('T')[0],
     title: 'Daily Jungle Adventure',
     description: 'Complete today\'s expert-level animal puzzle',
-    // Daily challenge uses user's grid size but ALWAYS Expert difficulty
     gridSize: settings.gridSize || '8x8',
     difficulty: 'Expert' as const,
     reward: 150,
@@ -49,7 +49,6 @@ const DailyChallengeScreen = () => {
     completed: false,
     bestTime: null as number | null,
     attempts: 0,
-    // Previous days' puzzles
     previousPuzzles: [
       { date: 'Yesterday', completed: true, time: 245 },
       { date: '2 days ago', completed: true, time: 312 },
@@ -57,7 +56,6 @@ const DailyChallengeScreen = () => {
     ],
   });
 
-  // Calculate time until midnight
   function calculateTimeRemaining() {
     const now = new Date();
     const midnight = new Date(now);
@@ -73,7 +71,6 @@ const DailyChallengeScreen = () => {
 
   useEffect(() => {
     loadChallengeProgress();
-    // Update timer every second
     const interval = setInterval(() => {
       setChallengeData(prev => ({
         ...prev,
@@ -108,7 +105,7 @@ const DailyChallengeScreen = () => {
   const handleStartChallenge = () => {
     navigation.navigate('Play', {
       gridSize: challengeData.gridSize,
-      difficulty: 'Expert', // Always Expert for challenges
+      difficulty: 'Expert',
       challengeType: 'daily',
       challengeId: challengeData.id,
     });
@@ -267,6 +264,9 @@ const DailyChallengeScreen = () => {
             Complete today's challenge to continue your streak!
           </Text>
         </View>
+
+        {/* Add Footer */}
+        <AppFooter />  {/* <-- Added footer here */}
       </ScrollView>
     </SafeAreaView>
   );
