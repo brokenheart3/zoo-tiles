@@ -14,7 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemeContext, themeStyles } from "../context/ThemeContext";
 import { useSettings } from "../context/SettingsContext";
 import { useProfile } from "../context/ProfileContext";
-import AppFooter from "../components/common/AppFooter"; // <-- Added import
+import AppFooter from "../components/common/AppFooter";
 
 type RootStackParamList = {
   Play: {
@@ -22,6 +22,7 @@ type RootStackParamList = {
     difficulty: 'Expert';
     challengeType: 'daily';
     challengeId?: string;
+    key?: string; // Added unique key for fresh game
   };
   Home: undefined;
 };
@@ -106,8 +107,9 @@ const DailyChallengeScreen = () => {
     navigation.navigate('Play', {
       gridSize: challengeData.gridSize,
       difficulty: 'Expert',
-      challengeType: 'daily',
+      challengeType: 'daily', // ensures PlayScreen knows it's a daily challenge
       challengeId: challengeData.id,
+      key: `daily-${challengeData.id}-${Date.now()}`, // ensures fresh game every time
     });
   };
 
@@ -138,24 +140,18 @@ const DailyChallengeScreen = () => {
           </Text>
         </View>
 
-        {/* Today's Challenge Card */}
+        {/* Challenge Card */}
         <View style={[styles.challengeCard, { backgroundColor: colors.button }]}>
           <View style={[styles.badge, { backgroundColor: '#4CAF50' }]}>
             <Text style={styles.badgeText}>TODAY'S CHALLENGE</Text>
           </View>
           
           <View style={styles.challengeHeader}>
-            <Text style={[styles.challengeTitle, { color: colors.text }]}>
-              {challengeData.title}
-            </Text>
-            <Text style={[styles.gridSizeBadge, { color: colors.text }]}>
-              {challengeData.gridSize}
-            </Text>
+            <Text style={[styles.challengeTitle, { color: colors.text }]}>{challengeData.title}</Text>
+            <Text style={[styles.gridSizeBadge, { color: colors.text }]}>{challengeData.gridSize}</Text>
           </View>
           
-          <Text style={[styles.challengeDesc, { color: colors.text }]}>
-            {challengeData.description}
-          </Text>
+          <Text style={[styles.challengeDesc, { color: colors.text }]}>{challengeData.description}</Text>
           
           {/* Challenge Details */}
           <View style={styles.detailsGrid}>
@@ -238,9 +234,7 @@ const DailyChallengeScreen = () => {
           </Text>
           {challengeData.previousPuzzles.map((puzzle, index) => (
             <View key={index} style={styles.previousPuzzle}>
-              <Text style={[styles.previousDate, { color: colors.text }]}>
-                {puzzle.date}
-              </Text>
+              <Text style={[styles.previousDate, { color: colors.text }]}>{puzzle.date}</Text>
               <View style={styles.previousStatus}>
                 <Text style={[styles.previousCompleted, { color: '#4CAF50' }]}>
                   {puzzle.completed ? '✓ Completed' : '–'}
@@ -265,8 +259,7 @@ const DailyChallengeScreen = () => {
           </Text>
         </View>
 
-        {/* Add Footer */}
-        <AppFooter />  {/* <-- Added footer here */}
+        <AppFooter />
       </ScrollView>
     </SafeAreaView>
   );
@@ -277,6 +270,7 @@ const formatTime = (seconds: number): string => {
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
+
 
 const styles = StyleSheet.create({
   loadingContainer: {

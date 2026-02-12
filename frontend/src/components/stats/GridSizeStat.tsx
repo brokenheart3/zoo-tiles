@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 
 interface GridSizeStatProps {
   gridSize: string;
-  bestTime: string;
+  bestTime?: string;
   averageTime?: string;
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Expert';
   backgroundColor: string;
@@ -12,7 +12,7 @@ interface GridSizeStatProps {
 
 const GridSizeStat: React.FC<GridSizeStatProps> = ({
   gridSize,
-  bestTime,
+  bestTime = '--',
   averageTime,
   difficulty,
   backgroundColor,

@@ -1,10 +1,13 @@
-import React from "react";
-import { NavigationContainer } from "@react-navigation/native";
-import BottomTabs from "./BottomTabs";
+// navigation/AppNavigator.tsx
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import RootNavigator from './RootNavigator';
 
 const AppNavigator = () => {
   return (
-      <BottomTabs />
+    <NavigationContainer>
+      <RootNavigator />
+    </NavigationContainer>
   );
 };
 

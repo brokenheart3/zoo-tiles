@@ -1,27 +1,23 @@
+// App.tsx
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { SettingsProvider } from './src/context/SettingsContext';
 import { ProfileProvider } from './src/context/ProfileContext';
+import { AuthProvider } from './src/context/AuthContext'; // Add this
 import AppNavigator from './src/navigation/AppNavigator';
-import { auth, db } from './src/services/firebase';
 
 const App: React.FC = () => {
-  console.log('Firebase Auth:', auth);
-  console.log('Firestore DB:', db);
-
   return (
-    <SettingsProvider>
-      <ThemeProvider>
-        <ProfileProvider>
-          <NavigationContainer>
+    <AuthProvider>
+      <SettingsProvider>
+        <ThemeProvider>
+          <ProfileProvider>
             <AppNavigator />
-          </NavigationContainer>
-        </ProfileProvider>
-      </ThemeProvider>
-    </SettingsProvider>
+          </ProfileProvider>
+        </ThemeProvider>
+      </SettingsProvider>
+    </AuthProvider>
   );
 };
 
 export default App;
-

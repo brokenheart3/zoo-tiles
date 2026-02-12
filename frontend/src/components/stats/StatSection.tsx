@@ -18,7 +18,9 @@ const StatSection: React.FC<StatSectionProps> = ({
     <View style={styles.container}>
       <Text style={[styles.title, { color: textColor }]}>{title}</Text>
       {showDivider && <View style={styles.divider} />}
-      {children}
+      <View>
+        {children}
+      </View>
     </View>
   );
 };

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 interface QuickStatCardProps {
-  value: string | number;
+  value?: string | number;
   label: string;
   icon?: string;
   valueColor?: string;
@@ -12,7 +12,7 @@ interface QuickStatCardProps {
 }
 
 const QuickStatCard: React.FC<QuickStatCardProps> = ({
-  value,
+  value = '-', // default to '-' if undefined
   label,
   icon,
   valueColor,

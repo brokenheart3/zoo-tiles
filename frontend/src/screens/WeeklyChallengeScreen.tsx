@@ -22,6 +22,7 @@ type RootStackParamList = {
     difficulty: 'Expert';
     challengeType: 'weekly';
     challengeId?: string;
+    key?: string;
   };
   Home: undefined;
 };
@@ -129,6 +130,7 @@ const WeeklyChallengeScreen = () => {
       difficulty: 'Expert', // Always Expert for challenges
       challengeType: 'weekly',
       challengeId: challengeData.id,
+      key: `weekly-${challengeData.id}-${Date.now()}`,
     });
   };
 

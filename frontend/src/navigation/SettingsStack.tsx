@@ -27,6 +27,9 @@ export type SettingsStackParamList = {
   About: undefined;
   PrivacyPolicy: undefined;
   Terms: undefined;
+  Account: undefined;
+  SignIn: undefined;
+  SignUp: undefined;
 };
 
 const Stack = createStackNavigator<SettingsStackParamList>();

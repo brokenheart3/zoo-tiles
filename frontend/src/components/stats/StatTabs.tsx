@@ -28,24 +28,23 @@ const StatTabs: React.FC<StatTabsProps> = ({
     <View style={[styles.container, { backgroundColor }]}>
       {tabs.map((tab) => {
         const isActive = activeTab === tab.id;
-        
+
         return (
           <TouchableOpacity
             key={tab.id}
             style={[
               styles.tab,
-              isActive && [styles.activeTab, { backgroundColor: activeBackgroundColor }]
+              isActive && { backgroundColor: activeBackgroundColor }
             ]}
             onPress={() => onTabChange(tab.id)}
           >
             {tab.icon && <Text style={styles.icon}>{tab.icon}</Text>}
-            <Text style={[
-              styles.tabText,
-              { 
-                color: isActive ? activeTextColor : textColor,
-                opacity: isActive ? 1 : 0.8
-              }
-            ]}>
+            <Text
+              style={[
+                styles.tabText,
+                { color: isActive ? activeTextColor : textColor, opacity: isActive ? 1 : 0.8 }
+              ]}
+            >
               {tab.label}
             </Text>
           </TouchableOpacity>
@@ -58,7 +57,6 @@ const StatTabs: React.FC<StatTabsProps> = ({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 12,
     marginHorizontal: 20,
@@ -73,9 +71,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     flexDirection: 'row',
     justifyContent: 'center',
-  },
-  activeTab: {
-    backgroundColor: '#F0F0F0',
   },
   icon: {
     fontSize: 16,

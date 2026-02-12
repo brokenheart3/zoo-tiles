@@ -7,10 +7,12 @@ interface StatsGridProps {
 }
 
 const StatsGrid: React.FC<StatsGridProps> = ({ children, columns = 2 }) => {
+  const colCount = columns > 0 ? columns : 2;
+
   return (
     <View style={[styles.container, { flexDirection: 'row', flexWrap: 'wrap' }]}>
       {React.Children.map(children, (child, index) => (
-        <View style={[styles.item, { width: `${100 / columns}%` }]}>
+        <View key={index} style={[styles.item, { width: `${100 / colCount}%` }]}>
           {child}
         </View>
       ))}

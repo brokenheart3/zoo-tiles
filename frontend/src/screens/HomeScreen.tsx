@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeStyles } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { useProfile } from '../context/ProfileContext';
+import { goToPlay } from '../navigation/goToPlay';
 
 // Import homescreen components
 import {
@@ -28,7 +29,8 @@ import { AppFooter } from '../components/common';
 // Import services
 import { getChallengePlayerCount } from '../services/simpleChallengeService';
 import { getTimeRemaining, getWeekNumber } from '../utils/timeUtils';
-import { getRandomFact, extractAnimalInfo } from '../services/api';
+import { fetchDailyAnimalFact } from '../services/api';
+
 
 // Navigation types
 type RootStackParamList = {
@@ -159,15 +161,16 @@ const HomeScreen: React.FC = () => {
   const gridProperties = GRID_SIZE_PROPERTIES[currentGridSize];
 
   // Load animal fact from API
+  // Load animal fact from API
   const loadAnimalFact = async (forceRefresh: boolean = false) => {
+    setFactData(prev => ({ ...prev, loading: true }));
+
     try {
-      setFactData(prev => ({ ...prev, loading: true }));
-      
       const today = new Date().toDateString();
       const storedDate = await AsyncStorage.getItem('lastFactDate');
       const storedFactData = await AsyncStorage.getItem('dailyFactData');
-      
-      // Check if we have today's fact and not forcing refresh
+
+      // Use cached fact if still valid
       if (!forceRefresh && storedDate === today && storedFactData) {
         const parsedData = JSON.parse(storedFactData);
         setFactData({
@@ -178,50 +181,37 @@ const HomeScreen: React.FC = () => {
         });
         return;
       }
-      
-      // Get random fact from API
-      const response = await getRandomFact();
-      console.log('Fact API response:', response);
-      
-      if (response.success && response.fact) {
-        const displayFact = response.fact;
-        
-        // Extract animal info using the helper function
-        const animalInfo = extractAnimalInfo(response);
-        const animalName = animalInfo.name;
-        const animalEmoji = animalInfo.emoji || '🐾';
-        
-        const progress = response.totalFacts ? 
-          `Fact ${response.index || 1} of ${response.totalFacts}` : 
-          'Daily animal fact';
-        
-        // Save to storage
-        await AsyncStorage.setItem('lastFactDate', today);
-        await AsyncStorage.setItem('dailyFactData', JSON.stringify({
+
+      // Fetch the new daily animal fact
+      const factString = await fetchDailyAnimalFact();
+      if (!factString) throw new Error('No fact returned');
+
+      // Split into name and fact
+      const [name, ...factParts] = factString.split(': ');
+      const displayFact = factParts.join(': ');
+
+      const progress = 'Daily animal fact';
+
+      await AsyncStorage.setItem('lastFactDate', today);
+      await AsyncStorage.setItem(
+        'dailyFactData',
+        JSON.stringify({
           displayFact,
-          animalName,
+          animalName: name,
           progress,
-          animalEmoji,
-          rawFact: response.fact,
           fetchedAt: new Date().toISOString(),
-        }));
-        
-        setFactData({
-          displayFact,
-          animalName,
-          progress,
-          loading: false,
-        });
-        
-      } else {
-        // API returned success: false
-        throw new Error(response.error || 'Failed to load fact from API');
-      }
-      
+        })
+      );
+
+      setFactData({
+        displayFact,
+        animalName: name,
+        progress,
+        loading: false,
+      });
     } catch (error: any) {
       console.error('Error loading animal fact:', error.message);
-      
-      // Try to use cached fact even if it's old
+
       try {
         const storedFactData = await AsyncStorage.getItem('dailyFactData');
         if (storedFactData) {
@@ -234,10 +224,8 @@ const HomeScreen: React.FC = () => {
           });
           return;
         }
-      } catch (e) {
-      }
-      
-      // Show error to user
+      } catch {}
+
       setFactData({
         displayFact: 'Failed to load animal fact. Please try again.',
         animalName: '',
@@ -346,57 +334,38 @@ const HomeScreen: React.FC = () => {
   const getGreeting = () => {
     const hour = new Date().getHours();
     let timeGreeting = '';
-    
+
     if (hour < 12) timeGreeting = 'Good morning';
     else if (hour < 18) timeGreeting = 'Good afternoon';
     else timeGreeting = 'Good evening';
-    
-    // Check if user has set up profile
-    if (!profile?.name) {
-      return {
-        greeting: `${timeGreeting}, Adventurer! 👋`,
-        subtitle: 'Welcome to Zoo-Tiles!',
-        showSettingsPrompt: !hasCustomSettings,
-        showProfilePrompt: true,
-        settingsPromptText: 'Configure your game settings first',
-        profilePromptText: 'Create a profile to save your progress',
-      };
-    }
-    
-    const firstName = profile.name.split(' ')[0];
-    
-    // Check if it's a generic/default name
-    const defaultNames = ['player', 'user', 'guest', 'new user'];
-    if (defaultNames.includes(firstName.toLowerCase())) {
-      return {
-        greeting: `${timeGreeting}, Explorer! 👋`,
-        subtitle: 'Ready for today\'s animal puzzles?',
-        showSettingsPrompt: !hasCustomSettings,
-        showProfilePrompt: true,
-        settingsPromptText: 'Customize your game experience',
-        profilePromptText: 'Personalize your profile',
-      };
-    }
-    
-    // Personalized greeting for returning users
+
+    const firstName = profile?.name?.split(' ')[0] || 'Explorer';
     const puzzlesSolved = profile?.stats?.puzzlesSolved || 0;
     const currentStreak = profile?.stats?.currentStreak || 0;
-    
+
     let subtitle = 'Ready for today\'s challenge?';
+
+    // Only show puzzles solved & streak if user has played at least one puzzle
     if (puzzlesSolved > 0) {
       subtitle = `You've solved ${puzzlesSolved} puzzle${puzzlesSolved !== 1 ? 's' : ''}`;
       if (currentStreak > 0) {
         subtitle += ` • ${currentStreak} day streak`;
       }
     }
-    
+
+    const showSettingsPrompt = !hasCustomSettings;
+    const showProfilePrompt = !profile?.name;
+
+    const settingsPromptText = 'Customize your settings';
+    const profilePromptText = 'Create a profile to save your progress';
+
     return {
       greeting: `${timeGreeting}, ${firstName}! 👋`,
       subtitle,
-      showSettingsPrompt: !hasCustomSettings,
-      showProfilePrompt: false,
-      settingsPromptText: 'Customize your settings',
-      profilePromptText: '',
+      showSettingsPrompt,
+      showProfilePrompt,
+      settingsPromptText,
+      profilePromptText,
     };
   };
 
@@ -520,8 +489,8 @@ const HomeScreen: React.FC = () => {
           themeColors={colors}
           isUrgent={dailyChallenge.isUrgent}
           isLoading={dailyChallenge.loading}
-          onPress={handleDailyChallengePress}
-          onPlayPress={handlePlayDailyChallenge}
+          onPress={handleDailyChallengePress}   // view details
+          onPlayPress={() => goToPlay(navigation, 'daily')} // play button
           challengeColors={CHALLENGE_COLORS}
         />
 
@@ -538,8 +507,8 @@ const HomeScreen: React.FC = () => {
           themeColors={colors}
           isUrgent={weeklyChallenge.isUrgent}
           isLoading={weeklyChallenge.loading}
-          onPress={handleWeeklyChallengePress}
-          onPlayPress={handlePlayWeeklyChallenge}
+          onPress={handleWeeklyChallengePress} // view details
+          onPlayPress={() => goToPlay(navigation, 'weekly')} // play button
           challengeColors={CHALLENGE_COLORS}
         />
 
@@ -559,7 +528,7 @@ const HomeScreen: React.FC = () => {
           hasCustomSettings={hasCustomSettings}
           themeColors={colors}
           difficultyColors={DIFFICULTY_COLORS}
-          onPress={handleQuickPlayPress}
+          onPress={() => goToPlay(navigation, 'sequential')}
         />
 
         {/* Settings Link */}

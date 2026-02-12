@@ -1,3 +1,4 @@
+// components/stats/AchievementCard.tsx
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
@@ -18,61 +19,34 @@ const AchievementCard: React.FC<AchievementCardProps> = ({
   description,
   icon,
   unlocked,
-  progress,
-  maxProgress,
+  progress = 0,
+  maxProgress = 100,
   unlockedDate,
   backgroundColor,
   textColor,
 }) => {
-  const showProgress = progress !== undefined && maxProgress !== undefined && maxProgress > 1;
-  const progressPercentage = showProgress ? (progress / maxProgress) * 100 : 0;
+  const percentage = Math.min((progress / maxProgress) * 100, 100);
 
   return (
-    <View style={[styles.container, { 
-      backgroundColor,
-      opacity: unlocked ? 1 : 0.7
-    }]}>
-      <View style={styles.iconContainer}>
-        <Text style={styles.icon}>{icon}</Text>
-      </View>
-      
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <Text style={[styles.name, { color: textColor }]}>{name}</Text>
-          {unlocked && (
-            <View style={styles.unlockedBadge}>
-              <Text style={styles.unlockedText}>UNLOCKED</Text>
-            </View>
-          )}
-        </View>
-        
-        <Text style={[styles.description, { color: textColor }]}>
-          {description}
-        </Text>
-        
-        {showProgress && (
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBar}>
-              <View 
-                style={[
-                  styles.progressFill,
-                  { 
-                    width: `${progressPercentage}%`,
-                    backgroundColor: unlocked ? '#4CAF50' : '#2196F3'
-                  }
-                ]} 
-              />
-            </View>
-            <Text style={[styles.progressText, { color: textColor }]}>
-              {progress}/{maxProgress}
-            </Text>
-          </View>
-        )}
-        
-        {unlocked && unlockedDate && (
-          <Text style={[styles.date, { color: textColor }]}>
+    <View style={[styles.container, { backgroundColor }]}>
+      <Text style={[styles.icon]}>{icon}</Text>
+      <View style={styles.textContainer}>
+        <Text style={[styles.name, { color: textColor }]}>{name}</Text>
+        <Text style={[styles.description, { color: textColor }]}>{description}</Text>
+        {unlockedDate && (
+          <Text style={[styles.unlockedDate, { color: textColor }]}>
             Unlocked: {unlockedDate}
           </Text>
+        )}
+        {!unlocked && (
+          <View style={styles.progressBar}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${percentage}%`, backgroundColor: '#4CAF50' },
+              ]}
+            />
+          </View>
         )}
       </View>
     </View>
@@ -82,76 +56,44 @@ const AchievementCard: React.FC<AchievementCardProps> = ({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    borderRadius: 12,
     padding: 16,
-    marginVertical: 8,
-  },
-  iconContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
+    borderRadius: 12,
+    marginVertical: 6,
     alignItems: 'center',
-    marginRight: 16,
   },
   icon: {
-    fontSize: 24,
+    fontSize: 32,
+    marginRight: 12,
   },
-  content: {
+  textContainer: {
     flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
   },
   name: {
     fontSize: 16,
     fontWeight: 'bold',
-    flex: 1,
-  },
-  unlockedBadge: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginLeft: 8,
-  },
-  unlockedText: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: 'bold',
+    marginBottom: 4,
   },
   description: {
     fontSize: 14,
-    opacity: 0.9,
-    marginBottom: 8,
+    opacity: 0.8,
+    marginBottom: 6,
   },
-  progressContainer: {
-    marginBottom: 4,
+  unlockedDate: {
+    fontSize: 12,
+    opacity: 0.7,
   },
   progressBar: {
-    height: 4,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 2,
+    height: 6,
+    backgroundColor: '#DDD',
+    borderRadius: 4,
     overflow: 'hidden',
-    marginBottom: 4,
+    marginTop: 6,
   },
   progressFill: {
     height: '100%',
-    borderRadius: 2,
-  },
-  progressText: {
-    fontSize: 12,
-    textAlign: 'right',
-  },
-  date: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    opacity: 0.8,
+    borderRadius: 4,
   },
 });
 
 export default AchievementCard;
+

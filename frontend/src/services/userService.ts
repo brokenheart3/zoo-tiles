@@ -16,13 +16,20 @@ export const createUserIfNotExists = async (user: User) => {
       gridSize: "8x8",
       difficulty: "Easy",
       stats: {
-        gamesPlayed: 0,
+        puzzlesSolved: 0,
+        currentStreak: 0,
         dailyCompleted: 0,
         weeklyCompleted: 0,
+        totalPlayTime: 0,
+        bestTime: 0,
+        averageTime: 0,
+        challengesCompleted: 0,
+        perfectGames: 0,
       },
     });
   }
 };
+
 
 // Fetch the global daily challenge
 export const getDailyChallenge = async () => {

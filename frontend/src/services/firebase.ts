@@ -1,3 +1,4 @@
+// services/firebase.ts (or firebaseConfig.ts - whichever matches your AuthContext import)
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
@@ -18,6 +19,7 @@ import {
   MESSAGING_SENDER_ID_IOS
 } from "@env";
 
+// Your existing platform-specific config
 const firebaseConfig = {
   apiKey: Platform.OS === "ios" ? API_KEY_IOS : API_KEY_ANDROID,
   authDomain: Platform.OS === "ios" ? AUTH_DOMAIN_IOS : AUTH_DOMAIN_ANDROID,

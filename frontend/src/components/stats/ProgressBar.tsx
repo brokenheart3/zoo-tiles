@@ -22,8 +22,9 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
   showPercentage = true,
   height = 8,
 }) => {
-  const percentage = Math.min((current / total) * 100, 100);
-  const isComplete = current >= total;
+  const safeTotal = total > 0 ? total : 1; // prevent division by zero
+  const percentage = Math.min((current / safeTotal) * 100, 100);
+  const isComplete = total > 0 && current >= total;
 
   return (
     <View style={styles.container}>

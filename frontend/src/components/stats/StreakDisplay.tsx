@@ -17,12 +17,14 @@ const StreakDisplay: React.FC<StreakDisplayProps> = ({
   const getStreakColor = (streak: number) => {
     if (streak >= 14) return '#FF9800';
     if (streak >= 7) return '#4CAF50';
-    return '#2196F3';
+    if (streak > 0) return '#2196F3';
+    return '#AAA';
   };
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
       <Text style={[styles.title, { color: textColor }]}>Streak Stats</Text>
+
       <View style={styles.streaksContainer}>
         <View style={styles.streakItem}>
           <Text style={[styles.streakValue, { color: getStreakColor(currentStreak) }]}>
@@ -30,27 +32,29 @@ const StreakDisplay: React.FC<StreakDisplayProps> = ({
           </Text>
           <Text style={[styles.streakLabel, { color: textColor }]}>Current</Text>
         </View>
-        
+
         <View style={styles.divider} />
-        
+
         <View style={styles.streakItem}>
-          <Text style={[styles.streakValue, { color: '#FF9800' }]}>
+          <Text style={[styles.streakValue, { color: getStreakColor(longestStreak) }]}>
             {longestStreak}
           </Text>
           <Text style={[styles.streakLabel, { color: textColor }]}>Longest</Text>
         </View>
       </View>
-      
-      <View style={styles.fireContainer}>
-        {Array.from({ length: Math.min(currentStreak, 7) }).map((_, index) => (
-          <Text key={index} style={styles.fireEmoji}>🔥</Text>
-        ))}
-        {currentStreak > 7 && (
-          <Text style={[styles.streakText, { color: textColor }]}>
-            +{currentStreak - 7}
-          </Text>
-        )}
-      </View>
+
+      {currentStreak > 0 && (
+        <View style={styles.fireContainer}>
+          {Array.from({ length: Math.min(currentStreak, 7) }).map((_, index) => (
+            <Text key={index} style={styles.fireEmoji}>🔥</Text>
+          ))}
+          {currentStreak > 7 && (
+            <Text style={[styles.streakText, { color: textColor }]}>
+              +{currentStreak - 7}
+            </Text>
+          )}
+        </View>
+      )}
     </View>
   );
 };

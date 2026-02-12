@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { formatTime } from '../../utils/formatters'; // Import from shared utils
+import { formatTime } from '../../utils/formatters'; // shared utils
 
 interface TimeDisplayProps {
   minutes: number;
@@ -18,7 +18,7 @@ const TimeDisplay: React.FC<TimeDisplayProps> = ({
   compact = false,
 }) => {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && styles.compactContainer]}>
       {showLabel && (
         <Text style={[styles.label, { color: textColor }]}>{label}</Text>
       )}
@@ -33,10 +33,16 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
   },
+  compactContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+  },
   label: {
     fontSize: 12,
     opacity: 0.8,
     marginBottom: 4,
+    marginRight: 4, // if compact
   },
   time: {
     fontSize: 18,
