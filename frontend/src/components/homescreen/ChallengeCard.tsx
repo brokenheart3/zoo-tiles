@@ -12,14 +12,14 @@ type ChallengeCardProps = {
   emoji: string;
   progress?: string;
   themeColors: any;
-  isUrgent?: boolean; // NEW: Urgency flag for timer styling
-  isLoading?: boolean; // NEW: Loading state for players
+  isUrgent?: boolean;
+  isLoading?: boolean;
   onPress: () => void;
   onPlayPress: () => void;
-  challengeColors: {
-    daily: { bg: string; text: string };
-    weekly: { bg: string; text: string };
-  };
+  played?: boolean;
+  result?: any;
+  buttonText?: string;
+  buttonColor?: string; // Add optional button color
 };
 
 const ChallengeCard: React.FC<ChallengeCardProps> = ({
@@ -31,21 +31,30 @@ const ChallengeCard: React.FC<ChallengeCardProps> = ({
   emoji,
   progress,
   themeColors,
-  isUrgent = false, // Default to false
-  isLoading = false, // Default to false
+  isUrgent = false,
+  isLoading = false,
   onPress,
   onPlayPress,
-  challengeColors,
+  played = false,
+  result,
+  buttonText,
+  buttonColor, // New prop
 }) => {
   const isDaily = type === 'daily';
-  const colors = challengeColors[type];
+
+  console.log('🎴 ChallengeCard - type:', type, 'played:', played, 'buttonText:', buttonText);
   
+  // Type badge colors
+  const typeBadgeColors = {
+    daily: { bg: '#2E7D32', text: '#ffffff' },
+    weekly: { bg: '#1565C0', text: '#ffffff' },
+  };
+
   // Helper to determine if timer is in final countdown
   const isFinalHour = (timeStr: string): boolean => {
     if (!timeStr || timeStr === 'Loading...') return false;
-    // Check if less than 1 hour remaining (format: "Xh Ym Zs" or "Xm Ys")
     return timeStr.includes('0h') || 
-           (!timeStr.includes('h') && !timeStr.includes('d')); // Just minutes and seconds
+           (!timeStr.includes('h') && !timeStr.includes('d'));
   };
   
   // Helper to determine if challenge has ended
@@ -55,55 +64,87 @@ const ChallengeCard: React.FC<ChallengeCardProps> = ({
 
   const timerIsUrgent = isUrgent || isFinalHour(remainingTime) || hasEnded(remainingTime);
 
+  // Use buttonText if provided, otherwise fall back to internal logic
+  const displayButtonText = buttonText || (() => {
+    if (played) return 'SEE RESULTS';
+    if (hasEnded(remainingTime)) return 'CHALLENGE ENDED';
+    return `PLAY ${type.toUpperCase()} CHALLENGE`;
+  })();
+
+  // Use buttonColor if provided, otherwise fall back to internal logic
+  const displayButtonColor = buttonColor || (() => {
+    if (played) return '#9C27B0'; // Purple for results
+    if (hasEnded(remainingTime)) return '#9E9E9E'; // Gray for ended
+    return typeBadgeColors[type].bg;
+  })();
+
+  // Format result time if available
+  const getResultTime = () => {
+    if (!result?.bestTime) return null;
+    const mins = Math.floor(result.bestTime / 60);
+    const secs = result.bestTime % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const resultTime = getResultTime();
+
   return (
     <TouchableOpacity 
       style={[
         styles.challengeCard, 
         { backgroundColor: themeColors.button },
-        hasEnded(remainingTime) && styles.endedChallenge // Dim if expired
+        hasEnded(remainingTime) && styles.endedChallenge,
+        played && !hasEnded(remainingTime) && styles.playedCard 
       ]}
       onPress={onPress}
       activeOpacity={0.9}
     >
       <View style={styles.challengeHeader}>
-        <View style={[styles.badge, { backgroundColor: colors.bg }]}>
-          <Text style={[styles.badgeText, { color: colors.text }]}>
+        <View style={[styles.badge, { backgroundColor: typeBadgeColors[type].bg }]}>
+          <Text style={[styles.badgeText, { color: typeBadgeColors[type].text }]}>
             {type.toUpperCase()}
           </Text>
         </View>
         
-        {/* Urgency indicator */}
-        {timerIsUrgent && !hasEnded(remainingTime) && (
-          <View style={[styles.urgencyBadge, { backgroundColor: '#FF5722' }]}>
-            <Text style={styles.urgencyText}>⏰ ENDING SOON</Text>
+        {/* Show played badge only if not expired */}
+        {played && !hasEnded(remainingTime) && (
+          <View style={[styles.playedBadge, { backgroundColor: '#4CAF50' }]}>
+            <Text style={styles.playedBadgeText}>✓ COMPLETED</Text>
           </View>
         )}
         
-        {hasEnded(remainingTime) && (
-          <View style={[styles.urgencyBadge, { backgroundColor: '#9E9E9E' }]}>
-            <Text style={styles.urgencyText}>⏹️ ENDED</Text>
-          </View>
-        )}
-        
-        {!timerIsUrgent && !hasEnded(remainingTime) && isDaily ? (
-          <Text style={styles.challengeEmoji}>{emoji}</Text>
-        ) : !timerIsUrgent && !hasEnded(remainingTime) && !isDaily ? (
-          <View style={[styles.progressContainer, { backgroundColor: `${colors.bg}30` }]}>
-            <Text style={[styles.progressText, { color: themeColors.text }]}>
-              {progress}
-            </Text>
-          </View>
-        ) : null}
+        {/* Show emoji in header for all challenges */}
+        <Text style={styles.headerEmoji}>{emoji}</Text>
       </View>
       
-      {!isDaily && (
-        <Text style={styles.challengeEmojiLarge}>{emoji}</Text>
-      )}
+      {/* Large emoji for all challenges */}
+      <Text style={styles.largeEmoji}>{emoji}</Text>
       
       <Text style={[styles.cardTitle, { color: themeColors.text }]}>{title}</Text>
       <Text style={[styles.cardDesc, { color: themeColors.text }]}>
         {description}
       </Text>
+      
+      {/* Show result if played and not expired */}
+      {played && !hasEnded(remainingTime) && result && (
+        <View style={styles.resultContainer}>
+          <Text style={[styles.resultLabel, { color: themeColors.text }]}>Your Result:</Text>
+          <View style={styles.resultStats}>
+            {resultTime && (
+              <View style={styles.resultItem}>
+                <Text style={[styles.resultIcon, { color: themeColors.text }]}>⏱️</Text>
+                <Text style={[styles.resultValue, { color: themeColors.text }]}>{resultTime}</Text>
+              </View>
+            )}
+            {result.isPerfect && (
+              <View style={styles.resultItem}>
+                <Text style={[styles.resultIcon, { color: themeColors.text }]}>✨</Text>
+                <Text style={[styles.resultValue, { color: themeColors.text }]}>Perfect!</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
       
       {/* Timer and Players Row */}
       <View style={styles.statsContainer}>
@@ -154,26 +195,46 @@ const ChallengeCard: React.FC<ChallengeCardProps> = ({
           </View>
         </View>
       </View>
+
+      {/* Progress for weekly challenges */}
+      {!isDaily && progress && !played && (
+        <View style={styles.progressContainer}>
+          <Text style={[styles.progressText, { color: themeColors.text }]}>
+            Progress: {progress}
+          </Text>
+        </View>
+      )}
       
-      {/* Direct Play Button */}
+      {/* Urgency badge for ending soon - hide if played and not expired */}
+      {timerIsUrgent && !hasEnded(remainingTime) && !played && (
+        <View style={[styles.urgencyBadge, { backgroundColor: '#FF5722' }]}>
+          <Text style={styles.urgencyText}>⏰ ENDING SOON</Text>
+        </View>
+      )}
+      
+      {/* Direct Action Button - uses props from parent */}
       <TouchableOpacity 
         style={[
           styles.actionButton, 
-          { backgroundColor: colors.bg },
-          hasEnded(remainingTime) && styles.disabledButton
+          { 
+            backgroundColor: displayButtonColor,
+          }
         ]}
-        onPress={hasEnded(remainingTime) ? undefined : onPlayPress}
-        activeOpacity={hasEnded(remainingTime) ? 1 : 0.8}
-        disabled={hasEnded(remainingTime)}
+        onPress={onPlayPress}
+        activeOpacity={0.8}
+        disabled={false} 
       >
-        <Text style={[styles.actionText, { color: colors.text }]}>
-          {hasEnded(remainingTime) 
-            ? `CHALLENGE ENDED` 
-            : `PLAY ${type.toUpperCase()} CHALLENGE`}
+        <Text style={styles.actionText}>
+          {displayButtonText}
         </Text>
         {hasEnded(remainingTime) && (
           <Text style={styles.endedSubText}>
-            New challenge starts soon
+            New challenge starts at UTC midnight
+          </Text>
+        )}
+        {played && !hasEnded(remainingTime) && (
+          <Text style={styles.playedSubText}>
+            Tap to view your results
           </Text>
         )}
       </TouchableOpacity>
@@ -184,7 +245,7 @@ const ChallengeCard: React.FC<ChallengeCardProps> = ({
         onPress={onPress}
       >
         <Text style={[styles.viewDetailsText, { color: themeColors.text }]}>
-          View Challenge Details →
+          {played && !hasEnded(remainingTime) ? 'View Full Results →' : 'View Challenge Details →'}
         </Text>
       </TouchableOpacity>
     </TouchableOpacity>
@@ -202,6 +263,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 8,
+    position: 'relative',
+  },
+  playedCard: {
+    borderWidth: 2,
+    borderColor: '#4CAF50',
   },
   endedChallenge: {
     opacity: 0.9,
@@ -221,43 +287,66 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
-  urgencyBadge: {
+  playedBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 10,
+    marginLeft: 8,
   },
-  urgencyText: {
-    color: '#FFFFFF',
+  playedBadgeText: {
+    color: '#ffffff',
     fontSize: 10,
     fontWeight: 'bold',
   },
-  progressContainer: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  progressText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  challengeEmoji: {
+  headerEmoji: {
     fontSize: 24,
   },
-  challengeEmojiLarge: {
-    fontSize: 40,
+  largeEmoji: {
+    fontSize: 48,
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 15,
   },
   cardTitle: {
     fontSize: 22,
     fontWeight: 'bold',
     marginBottom: 8,
+    textAlign: 'center',
   },
   cardDesc: {
     fontSize: 14,
     opacity: 0.9,
     marginBottom: 15,
     lineHeight: 20,
+    textAlign: 'center',
+  },
+  resultContainer: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 15,
+  },
+  resultLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  resultStats: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+  },
+  resultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  resultIcon: {
+    fontSize: 16,
+  },
+  resultValue: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   statsContainer: {
     flexDirection: 'row',
@@ -316,22 +405,46 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  progressContainer: {
+    marginBottom: 15,
+    alignItems: 'center',
+  },
+  progressText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  urgencyBadge: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  urgencyText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
   actionButton: {
     paddingVertical: 14,
     borderRadius: 15,
     alignItems: 'center',
     marginBottom: 10,
   },
-  disabledButton: {
-    backgroundColor: '#9E9E9E',
-  },
   actionText: {
+    color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
   },
   endedSubText: {
     fontSize: 11,
     color: 'rgba(255, 255, 255, 0.8)',
+    marginTop: 2,
+  },
+  playedSubText: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.9)',
     marginTop: 2,
   },
   viewDetailsButton: {

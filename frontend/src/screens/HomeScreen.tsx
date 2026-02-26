@@ -1,4 +1,5 @@
-import React, { useContext, useState, useEffect } from 'react';
+// src/screens/HomeScreen.tsx
+import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -28,9 +29,10 @@ import { AppFooter } from '../components/common';
 
 // Import services
 import { getChallengePlayerCount } from '../services/simpleChallengeService';
-import { getTimeRemaining, getWeekNumber } from '../utils/timeUtils';
+import { getTimeRemaining, getWeekNumber, getUTCDateString } from '../utils/timeUtils';
 import { fetchDailyAnimalFact } from '../services/api';
-
+import { getHomePageData, getStatisticsData, getUserChallengeResult } from '../services/userService';
+import { auth } from '../services/firebase';
 
 // Navigation types
 type RootStackParamList = {
@@ -43,6 +45,19 @@ type RootStackParamList = {
   };
   Challenge: {
     screen: 'Daily' | 'Weekly';
+    challengeId?: string;
+    viewResults?: boolean;
+  };
+  ChallengeResults: {
+    challengeId: string;
+    challengeType: 'daily' | 'weekly';
+    time?: number;
+    isPerfect?: boolean;
+    moves?: number;
+    correctMoves?: number;
+    wrongMoves?: number;
+    accuracy?: number;
+    completed?: boolean;
   };
   Settings: undefined;
   Profile: undefined;
@@ -66,16 +81,49 @@ const DIFFICULTY_COLORS = {
   Expert: { bg: '#9C27B0', text: '#ffffff' },
 };
 
-// Challenge type colors
-const CHALLENGE_COLORS = {
-  daily: { bg: '#4CAF50', text: '#ffffff' },
-  weekly: { bg: '#2196F3', text: '#ffffff' },
-};
-
 // Default settings
 const DEFAULT_SETTINGS = {
   gridSize: '8x8' as const,
   difficulty: 'Medium' as const,
+};
+
+// Daily challenge animals (different for each day)
+const DAILY_ANIMALS = {
+  Monday: { emoji: '🐒', name: 'Monkey' },
+  Tuesday: { emoji: '🐯', name: 'Tiger' },
+  Wednesday: { emoji: '🦒', name: 'Giraffe' },
+  Thursday: { emoji: '🐘', name: 'Elephant' },
+  Friday: { emoji: '🦁', name: 'Lion' },
+  Saturday: { emoji: '🐼', name: 'Panda' },
+  Sunday: { emoji: '🦓', name: 'Zebra' },
+};
+
+// Weekly challenge animals (rotates each week)
+const WEEKLY_ANIMALS = [
+  { emoji: '🦁', name: 'Lion' },
+  { emoji: '🐘', name: 'Elephant' },
+  { emoji: '🦒', name: 'Giraffe' },
+  { emoji: '🦓', name: 'Zebra' },
+  { emoji: '🐅', name: 'Tiger' },
+  { emoji: '🦍', name: 'Gorilla' },
+  { emoji: '🐊', name: 'Crocodile' },
+  { emoji: '🦏', name: 'Rhino' },
+  { emoji: '🐆', name: 'Leopard' },
+  { emoji: '🦛', name: 'Hippo' },
+];
+
+// Helper to get today's animal
+const getTodayAnimal = () => {
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const today = dayNames[new Date().getDay()];
+  return DAILY_ANIMALS[today as keyof typeof DAILY_ANIMALS] || { emoji: '🦓', name: 'Zebra' };
+};
+
+// Helper to get this week's animal
+const getWeekAnimal = () => {
+  const weekNum = parseInt(getWeekNumber(new Date()));
+  const index = (weekNum - 1) % WEEKLY_ANIMALS.length;
+  return WEEKLY_ANIMALS[index];
 };
 
 // Helper to check if daily challenge is urgent
@@ -93,7 +141,7 @@ const isDailyChallengeUrgent = (timeString: string): boolean => {
     const hoursMatch = timeString.match(/(\d+)h/);
     if (hoursMatch && parseInt(hoursMatch[1]) === 0) return true;
   } else {
-    return true; // Only minutes and seconds remaining
+    return true;
   }
   
   return false;
@@ -117,6 +165,11 @@ const isWeeklyChallengeUrgent = (timeString: string): boolean => {
   return false;
 };
 
+// Helper for pluralization
+const pluralize = (count: number, singular: string, plural: string) => {
+  return count === 1 ? singular : plural;
+};
+
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { theme } = useContext(ThemeContext);
@@ -125,8 +178,33 @@ const HomeScreen: React.FC = () => {
   
   const colors = themeStyles[theme];
   
+  // Get today's and this week's animals
+  const todayAnimal = getTodayAnimal();
+  const weekAnimal = getWeekAnimal();
+  
   // State for user settings
   const [hasCustomSettings, setHasCustomSettings] = useState(false);
+  
+  // State for local storage data
+  const [homeStats, setHomeStats] = useState({
+    puzzlesSolved: 0,
+    accuracy: 0,
+    currentStreak: 0,
+    trophies: 0,
+    recentChallenges: [] as Array<{date: string, solved: boolean, time?: number, reward?: number}>
+  });
+  
+  const [achievements, setAchievements] = useState<Array<{
+    id: number;
+    name: string;
+    description: string;
+    unlocked: boolean;
+    progress: number;
+    icon: string;
+    unlockDate?: string;
+  }>>([]);
+  
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
   
   // State for animal fact
   const [factData, setFactData] = useState<{
@@ -155,12 +233,136 @@ const HomeScreen: React.FC = () => {
     loading: true
   });
 
+  // State for tracking if user played challenges
+  const [dailyPlayed, setDailyPlayed] = useState(false);
+  const [weeklyPlayed, setWeeklyPlayed] = useState(false);
+  const [dailyResult, setDailyResult] = useState<any>(null);
+  const [weeklyResult, setWeeklyResult] = useState<any>(null);
+
+  // State for expiration
+  const [isDailyExpired, setIsDailyExpired] = useState(false);
+  const [forceUpdate, setForceUpdate] = useState<number>(0);
+  
+  const timeUpdateRef = useRef<NodeJS.Timeout | null>(null);
+
   // Current settings
   const currentGridSize = settings.gridSize || DEFAULT_SETTINGS.gridSize;
   const currentDifficulty = settings.difficulty || DEFAULT_SETTINGS.difficulty;
-  const gridProperties = GRID_SIZE_PROPERTIES[currentGridSize];
+  const gridProperties = GRID_SIZE_PROPERTIES[currentGridSize as keyof typeof GRID_SIZE_PROPERTIES];
 
-  // Load animal fact from API
+  // ======================
+  // Load stats from profile context
+  // ======================
+  const loadStatsFromProfile = () => {
+    if (profile) {
+      console.log('📊 Loading stats from profile context:', {
+        puzzlesSolved: profile.stats.puzzlesSolved,
+        dailyChallengesCompleted: profile.stats.dailyChallengesCompleted,
+        weeklyChallengesCompleted: profile.stats.weeklyChallengesCompleted,
+        accuracy: profile.stats.accuracy,
+        currentStreak: profile.stats.currentStreak,
+        trophies: profile.trophies.filter(t => t.unlocked).length
+      });
+      
+      setHomeStats({
+        puzzlesSolved: profile.stats.puzzlesSolved || 0,
+        accuracy: profile.stats.accuracy || 0,
+        currentStreak: profile.stats.currentStreak || 0,
+        trophies: profile.trophies.filter(t => t.unlocked).length || 0,
+        recentChallenges: []
+      });
+    }
+  };
+
+  // Load achievements from profile trophies
+  const loadAchievementsFromProfile = () => {
+    if (profile && profile.trophies) {
+      console.log('🏆 Loading achievements from profile trophies:', profile.trophies.length);
+      
+      const achievementsArray = profile.trophies.map((trophy, index) => ({
+        id: index + 1,
+        name: trophy.name,
+        description: trophy.description,
+        unlocked: trophy.unlocked,
+        progress: trophy.unlocked ? 1 : 0,
+        icon: trophy.icon,
+        unlockDate: trophy.unlockDate
+      }));
+      
+      setAchievements(achievementsArray);
+    }
+  };
+
+  // Load local stats (for achievements and fallback)
+  const loadLocalStats = async () => {
+    try {
+      setIsLoadingStats(true);
+      
+      // Load from profile context
+      loadStatsFromProfile();
+      
+      // Load achievements from profile trophies
+      loadAchievementsFromProfile();
+      
+      // Also try to get from Firebase for additional data
+      const user = auth.currentUser;
+      const statsData = await getStatisticsData(user?.uid || null);
+      
+      if (statsData?.achievements) {
+        console.log('🏆 Firebase achievements data:', statsData.achievements);
+      }
+    } catch (error) {
+      console.error('Error loading local stats:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  // Load challenge played status
+  const loadChallengeStatus = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        console.log('👤 No user logged in');
+        return;
+      }
+
+      // Use UTC date for daily challenge ID to match DailyChallengeScreen
+      const todayId = `daily-${getUTCDateString()}`;
+      console.log('🔍 Checking daily challenge with UTC ID:', todayId);
+      const dailyResult = await getUserChallengeResult(user.uid, todayId);
+      console.log('📊 Daily result:', dailyResult);
+      
+      if (dailyResult && dailyResult.completed) {
+        console.log('✅ Daily challenge completed!');
+        setDailyPlayed(true);
+        setDailyResult(dailyResult);
+      } else {
+        console.log('❌ Daily challenge not completed');
+        setDailyPlayed(false);
+        setDailyResult(null);
+      }
+
+      // Check weekly challenge
+      const weekId = `weekly-${getWeekNumber(new Date())}`;
+      console.log('🔍 Checking weekly challenge:', weekId);
+      const weeklyResult = await getUserChallengeResult(user.uid, weekId);
+      console.log('📊 Weekly result:', weeklyResult);
+      
+      if (weeklyResult && weeklyResult.completed) {
+        console.log('✅ Weekly challenge completed!');
+        setWeeklyPlayed(true);
+        setWeeklyResult(weeklyResult);
+      } else {
+        console.log('❌ Weekly challenge not completed');
+        setWeeklyPlayed(false);
+        setWeeklyResult(null);
+      }
+    } catch (error) {
+      console.error('Error loading challenge status:', error);
+    }
+  };
+
   // Load animal fact from API
   const loadAnimalFact = async (forceRefresh: boolean = false) => {
     setFactData(prev => ({ ...prev, loading: true }));
@@ -170,7 +372,6 @@ const HomeScreen: React.FC = () => {
       const storedDate = await AsyncStorage.getItem('lastFactDate');
       const storedFactData = await AsyncStorage.getItem('dailyFactData');
 
-      // Use cached fact if still valid
       if (!forceRefresh && storedDate === today && storedFactData) {
         const parsedData = JSON.parse(storedFactData);
         setFactData({
@@ -182,11 +383,9 @@ const HomeScreen: React.FC = () => {
         return;
       }
 
-      // Fetch the new daily animal fact
       const factString = await fetchDailyAnimalFact();
       if (!factString) throw new Error('No fact returned');
 
-      // Split into name and fact
       const [name, ...factParts] = factString.split(': ');
       const displayFact = factParts.join(': ');
 
@@ -236,35 +435,30 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  // Clear stored facts manually
-  const clearStoredFacts = async () => {
-    try {
-      await AsyncStorage.removeItem('lastFactDate');
-      await AsyncStorage.removeItem('dailyFactData');
-      console.log('Stored facts cleared');
-      // Reload fact
-      await loadAnimalFact(true);
-    } catch (error) {
-      console.error('Error clearing stored facts:', error);
-    }
-  };
-
   // Load challenge data (player counts and timers)
   const loadChallengeData = async () => {
     try {
-      // Load daily challenge data
+      console.log('📊 Loading challenge player counts...');
+      
       const dailyPlayerCount = await getChallengePlayerCount('daily');
       const dailyTimeRemaining = getTimeRemaining('daily');
+      console.log('⏰ DAILY TIME REMAINING:', dailyTimeRemaining);
+      const dailyExpired = dailyTimeRemaining.includes('Expired');
+      
+      console.log('📊 Daily player count:', dailyPlayerCount);
+      console.log('📊 Daily expired:', dailyExpired);
       
       setDailyChallengeData({
         remainingTime: dailyTimeRemaining,
         playerCount: dailyPlayerCount,
         loading: false
       });
+      setIsDailyExpired(dailyExpired);
 
-      // Load weekly challenge data
       const weeklyPlayerCount = await getChallengePlayerCount('weekly');
       const weeklyTimeRemaining = getTimeRemaining('weekly');
+      
+      console.log('📊 Weekly player count:', weeklyPlayerCount);
       
       setWeeklyChallengeData({
         remainingTime: weeklyTimeRemaining,
@@ -273,48 +467,104 @@ const HomeScreen: React.FC = () => {
       });
     } catch (error) {
       console.error('Error loading challenge data:', error);
-      // Fallback to placeholder data
       setDailyChallengeData({
         remainingTime: 'Error loading',
-        playerCount: 2456,
+        playerCount: 0,
         loading: false
       });
       setWeeklyChallengeData({
         remainingTime: 'Error loading',
-        playerCount: 8921,
+        playerCount: 0,
         loading: false
       });
     }
   };
 
-  // Update timers every second and refresh data periodically
+  // Refresh all data function
+  const refreshAllData = async () => {
+    console.log('🔄 Refreshing all home screen data...');
+    loadStatsFromProfile();
+    loadAchievementsFromProfile();
+    await Promise.all([
+      loadLocalStats(),
+      loadChallengeStatus(),
+      loadChallengeData()
+    ]);
+    console.log('✅ Home screen data refreshed');
+  };
+
+  // Update timers every second using forceUpdate counter
   useEffect(() => {
     loadChallengeData();
     loadAnimalFact();
+    loadLocalStats();
+    loadChallengeStatus();
     
-    // Update timers every second
-    const timerInterval = setInterval(() => {
-      setDailyChallengeData(prev => ({
-        ...prev,
-        remainingTime: getTimeRemaining('daily')
-      }));
-      
-      setWeeklyChallengeData(prev => ({
-        ...prev,
-        remainingTime: getTimeRemaining('weekly')
-      }));
+    timeUpdateRef.current = setInterval(() => {
+      setForceUpdate(prev => prev + 1);
     }, 1000);
 
-    // Refresh player counts every 30 seconds
     const dataRefreshInterval = setInterval(() => {
-      loadChallengeData();
+      refreshAllData();
     }, 30000);
 
     return () => {
-      clearInterval(timerInterval);
+      if (timeUpdateRef.current) {
+        clearInterval(timeUpdateRef.current);
+      }
       clearInterval(dataRefreshInterval);
     };
   }, []);
+
+  // Memoize time values to prevent blinking
+  const timeInfo = useMemo(() => {
+    const dailyRemaining = getTimeRemaining('daily');
+    const weeklyRemaining = getTimeRemaining('weekly');
+    const dailyExpired = dailyRemaining.includes('Expired');
+    const weeklyExpired = weeklyRemaining.includes('Expired');
+    
+    return {
+      dailyRemaining,
+      weeklyRemaining,
+      dailyExpired,
+      weeklyExpired,
+      dailyUrgent: isDailyChallengeUrgent(dailyRemaining),
+      weeklyUrgent: isWeeklyChallengeUrgent(weeklyRemaining)
+    };
+  }, [forceUpdate]);
+
+  // Update dailyChallengeData and isDailyExpired when memoized values change
+  useEffect(() => {
+    setDailyChallengeData(prev => ({
+      ...prev,
+      remainingTime: timeInfo.dailyRemaining
+    }));
+    setIsDailyExpired(timeInfo.dailyExpired);
+    
+    setWeeklyChallengeData(prev => ({
+      ...prev,
+      remainingTime: timeInfo.weeklyRemaining
+    }));
+  }, [timeInfo]);
+
+  // Reload stats when profile changes
+  useEffect(() => {
+    console.log('📊 Profile updated - reloading stats');
+    loadStatsFromProfile();
+    loadAchievementsFromProfile();
+    loadLocalStats();
+    loadChallengeStatus();
+  }, [profile]);
+
+  // Add focus listener to refresh when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('🏠 Home screen focused - refreshing all data');
+      refreshAllData();
+    });
+
+    return unsubscribe;
+  }, [navigation, profile]);
 
   // Check user settings on mount
   useEffect(() => {
@@ -330,7 +580,17 @@ const HomeScreen: React.FC = () => {
     checkUserSettings();
   }, []);
 
-  // Smart greeting logic
+  // Helper to get contrasting text color
+  const getContrastColor = (bgColor: string): string => {
+    const hex = bgColor.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? '#000000' : '#ffffff';
+  };
+
+  // Smart greeting logic with pluralization
   const getGreeting = () => {
     const hour = new Date().getHours();
     let timeGreeting = '';
@@ -340,16 +600,18 @@ const HomeScreen: React.FC = () => {
     else timeGreeting = 'Good evening';
 
     const firstName = profile?.name?.split(' ')[0] || 'Explorer';
-    const puzzlesSolved = profile?.stats?.puzzlesSolved || 0;
-    const currentStreak = profile?.stats?.currentStreak || 0;
+    const puzzlesSolved = homeStats.puzzlesSolved || 0;
+    const currentStreak = homeStats.currentStreak || 0;
 
     let subtitle = 'Ready for today\'s challenge?';
 
-    // Only show puzzles solved & streak if user has played at least one puzzle
     if (puzzlesSolved > 0) {
-      subtitle = `You've solved ${puzzlesSolved} puzzle${puzzlesSolved !== 1 ? 's' : ''}`;
+      const gameText = pluralize(puzzlesSolved, 'game', 'games');
+      const streakText = pluralize(currentStreak, 'day', 'days');
+      
+      subtitle = `Played ${puzzlesSolved} ${gameText}`;
       if (currentStreak > 0) {
-        subtitle += ` • ${currentStreak} day streak`;
+        subtitle += `, ${currentStreak} ${streakText}`;
       }
     }
 
@@ -371,64 +633,89 @@ const HomeScreen: React.FC = () => {
 
   const greetingData = getGreeting();
   
-  // Challenge data with real values
-  const dailyChallenge = {
-    title: 'Daily Jungle Adventure',
-    description: `Complete today's special ${currentGridSize} puzzle with jungle animals`,
-    remainingTime: dailyChallengeData.remainingTime,
-    players: dailyChallengeData.playerCount.toLocaleString(),
-    emoji: '🐅',
-    loading: dailyChallengeData.loading,
-    isUrgent: isDailyChallengeUrgent(dailyChallengeData.remainingTime),
+  // Button text and color functions
+  const getDailyButtonText = () => {
+    // If expired, always show PLAY
+    if (timeInfo.dailyExpired) {
+      return 'PLAY DAILY CHALLENGE';
+    }
+    // If not expired and played, show SEE RESULTS
+    if (dailyPlayed) {
+      return 'SEE DAILY CHALLENGE RESULTS';
+    }
+    // Default
+    return 'PLAY DAILY CHALLENGE';
   };
-  
-  const weeklyChallenge = {
-    title: 'Weekly Safari Expedition',
-    description: `A special ${currentGridSize} puzzle available all week`,
-    remainingTime: weeklyChallengeData.remainingTime,
-    players: weeklyChallengeData.playerCount.toLocaleString(),
-    emoji: '🦓',
-    progress: '0/10',
-    loading: weeklyChallengeData.loading,
-    isUrgent: isWeeklyChallengeUrgent(weeklyChallengeData.remainingTime),
+
+  const getDailyButtonColor = () => {
+    // If expired or not played, use green
+    if (timeInfo.dailyExpired || !dailyPlayed) {
+      return '#2E7D32'; // Green for play
+    }
+    // If played and not expired, use purple
+    return '#9C27B0'; // Purple for results
   };
 
   // Navigation handlers
   const handleDailyChallengePress = () => {
-    navigation.navigate('Challenge', { screen: 'Daily' });
+    console.log('📅 Daily challenge pressed - expired:', timeInfo.dailyExpired, 'played:', dailyPlayed);
+    
+    // If expired OR not played, go to play
+    if (timeInfo.dailyExpired || !dailyPlayed) {
+      console.log('➡️ Navigating to Play');
+      goToPlay(navigation, 'daily', {
+        gridSize: currentGridSize,
+        difficulty: currentDifficulty
+      });
+    } else {
+      // Only show results if played AND not expired
+      console.log('➡️ Navigating to Results');
+      navigation.navigate('ChallengeResults', {
+        challengeId: `daily-${getUTCDateString()}`,
+        challengeType: 'daily',
+        time: dailyResult?.bestTime,
+        isPerfect: dailyResult?.isPerfect,
+        moves: dailyResult?.moves,
+        correctMoves: dailyResult?.correctMoves,
+        wrongMoves: dailyResult?.wrongMoves,
+        accuracy: dailyResult?.accuracy,
+        completed: true,
+      } as any);
+    }
   };
 
   const handleWeeklyChallengePress = () => {
-    navigation.navigate('Challenge', { screen: 'Weekly' });
+    if (weeklyPlayed) {
+      navigation.navigate('ChallengeResults', {
+        challengeId: `weekly-${getWeekNumber(new Date())}`,
+        challengeType: 'weekly',
+        time: weeklyResult?.bestTime,
+        isPerfect: weeklyResult?.isPerfect,
+        moves: weeklyResult?.moves,
+        correctMoves: weeklyResult?.correctMoves,
+        wrongMoves: weeklyResult?.wrongMoves,
+        accuracy: weeklyResult?.accuracy,
+        completed: true,
+      } as any);
+    } else {
+      goToPlay(navigation, 'weekly', {
+        gridSize: currentGridSize,
+        difficulty: currentDifficulty
+      });
+    }
   };
 
   const handleQuickPlayPress = () => {
-    navigation.navigate('Play', {
+    goToPlay(navigation, 'sequential', {
       gridSize: currentGridSize,
-      difficulty: currentDifficulty,
+      difficulty: currentDifficulty
     });
   };
 
-  const handlePlayDailyChallenge = () => {
-    if (!dailyChallenge.remainingTime.includes('Expired')) {
-      navigation.navigate('Play', {
-        gridSize: currentGridSize,
-        difficulty: 'Expert',
-        challengeType: 'daily',
-        challengeId: `daily-${new Date().toISOString().split('T')[0]}`,
-      });
-    }
-  };
-
-  const handlePlayWeeklyChallenge = () => {
-    if (!weeklyChallenge.remainingTime.includes('Expired')) {
-      navigation.navigate('Play', {
-        gridSize: currentGridSize,
-        difficulty: 'Expert',
-        challengeType: 'weekly',
-        challengeId: `weekly-${getWeekNumber(new Date())}`,
-      });
-    }
+  // Get weekly button text
+  const getWeeklyButtonText = () => {
+    if (weeklyPlayed) return 'SEE WEEKLY CHALLENGE RESULTS';
+    return 'PLAY WEEKLY CHALLENGE';
   };
 
   // Refresh fact manually
@@ -436,29 +723,38 @@ const HomeScreen: React.FC = () => {
     await loadAnimalFact(true);
   };
 
-  // Get fresh stats for new users (all zeros)
-  const getFreshStats = () => {
-    return {
-      puzzlesSolved: 0,
-      accuracy: 0,
-      currentStreak: 0,
-      totalPlayTime: 0,
-      bestTime: 0,
-      averageTime: 0,
-      challengesCompleted: 0,
-      perfectGames: 0
-    };
+  // Helper to safely render text
+  const renderSafeText = (text: string | number | undefined | null, fallback: string = '') => {
+    const safeText = text ?? fallback;
+    return String(safeText);
   };
 
-  // Get achievements for new users (all locked)
-  const getFreshTrophies = () => {
-    return [
-      { id: 1, name: 'First Puzzle', description: 'Complete your first puzzle', unlocked: false, icon: '🏆' },
-      { id: 2, name: 'Quick Solver', description: 'Solve a puzzle in under 5 minutes', unlocked: false, icon: '⚡'},
-      { id: 3, name: 'Accuracy Master', description: 'Achieve 100% accuracy on any puzzle', unlocked: false, icon: '🎯' },
-      { id: 4, name: 'Daily Streak', description: 'Complete 3 daily challenges in a row', unlocked: false, icon: '🔥' },
-      { id: 5, name: 'Weekly Warrior', description: 'Complete a weekly challenge', unlocked: false, icon: '🛡️' },
-    ];
+  // Challenge data
+  const dailyChallenge = {
+    title: `Daily ${todayAnimal.name} Adventure`,
+    description: `Complete today's special ${currentGridSize} puzzle with ${todayAnimal.name.toLowerCase()} animals`,
+    remainingTime: timeInfo.dailyRemaining,
+    players: dailyChallengeData.playerCount.toLocaleString(),
+    emoji: todayAnimal.emoji,
+    animalName: todayAnimal.name,
+    loading: dailyChallengeData.loading,
+    isUrgent: timeInfo.dailyUrgent,
+    played: dailyPlayed && !timeInfo.dailyExpired,
+    result: dailyResult,
+    isExpired: timeInfo.dailyExpired,
+  };
+  
+  const weeklyChallenge = {
+    title: `Weekly ${weekAnimal.name} Expedition`,
+    description: `A special ${currentGridSize} ${weekAnimal.name.toLowerCase()} puzzle available all week`,
+    remainingTime: timeInfo.weeklyRemaining,
+    players: weeklyChallengeData.playerCount.toLocaleString(),
+    emoji: weekAnimal.emoji,
+    animalName: weekAnimal.name,
+    loading: weeklyChallengeData.loading || isLoadingStats,
+    isUrgent: timeInfo.weeklyUrgent,
+    played: weeklyPlayed,
+    result: weeklyResult,
   };
 
   return (
@@ -478,57 +774,67 @@ const HomeScreen: React.FC = () => {
         />
 
         {/* Daily Challenge */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Daily Challenge</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {renderSafeText('Daily Challenge')}
+        </Text>
         <ChallengeCard
           type="daily"
-          title={dailyChallenge.title}
-          description={dailyChallenge.description}
-          remainingTime={dailyChallenge.remainingTime}
-          players={dailyChallenge.loading ? 'Loading...' : dailyChallenge.players}
-          emoji={dailyChallenge.emoji}
+          title={renderSafeText(dailyChallenge.title)}
+          description={renderSafeText(dailyChallenge.description)}
+          remainingTime={renderSafeText(dailyChallenge.remainingTime)}
+          players={dailyChallenge.loading ? 'Loading...' : renderSafeText(dailyChallenge.players)}
+          emoji={renderSafeText(dailyChallenge.emoji)}
           themeColors={colors}
           isUrgent={dailyChallenge.isUrgent}
           isLoading={dailyChallenge.loading}
-          onPress={handleDailyChallengePress}   // view details
-          onPlayPress={() => goToPlay(navigation, 'daily')} // play button
-          challengeColors={CHALLENGE_COLORS}
+          onPress={handleDailyChallengePress}
+          onPlayPress={handleDailyChallengePress}
+          played={dailyPlayed && !timeInfo.dailyExpired}
+          result={dailyResult}
+          buttonText={getDailyButtonText()}
+          buttonColor={getDailyButtonColor()}
         />
 
         {/* Weekly Challenge */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Weekly Challenge</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {renderSafeText('Weekly Challenge')}
+        </Text>
         <ChallengeCard
           type="weekly"
-          title={weeklyChallenge.title}
-          description={weeklyChallenge.description}
-          remainingTime={weeklyChallenge.remainingTime}
-          players={weeklyChallenge.loading ? 'Loading...' : weeklyChallenge.players}
-          emoji={weeklyChallenge.emoji}
-          progress={weeklyChallenge.progress}
+          title={renderSafeText(weeklyChallenge.title)}
+          description={renderSafeText(weeklyChallenge.description)}
+          remainingTime={renderSafeText(weeklyChallenge.remainingTime)}
+          players={weeklyChallenge.loading ? 'Loading...' : renderSafeText(weeklyChallenge.players)}
+          emoji={renderSafeText(weeklyChallenge.emoji)}
           themeColors={colors}
           isUrgent={weeklyChallenge.isUrgent}
           isLoading={weeklyChallenge.loading}
-          onPress={handleWeeklyChallengePress} // view details
-          onPlayPress={() => goToPlay(navigation, 'weekly')} // play button
-          challengeColors={CHALLENGE_COLORS}
+          onPress={handleWeeklyChallengePress}
+          onPlayPress={handleWeeklyChallengePress}
+          played={weeklyPlayed}
+          result={weeklyResult}
+          buttonText={getWeeklyButtonText()}
         />
 
         {/* Quick Play */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Play</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {renderSafeText('Quick Play')}
+        </Text>
         <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
-          {hasCustomSettings 
+          {renderSafeText(hasCustomSettings 
             ? `Your preferred settings: ${currentGridSize} • ${currentDifficulty}`
             : `Default settings: ${currentGridSize} • ${currentDifficulty}`
-          }
+          )}
         </Text>
         
         <QuickPlayCard
-          gridSize={currentGridSize}
-          difficulty={currentDifficulty}
-          emoji={gridProperties.emoji}
+          gridSize={renderSafeText(currentGridSize)}
+          difficulty={renderSafeText(currentDifficulty)}
+          emoji={renderSafeText(gridProperties?.emoji || '🎮')}
           hasCustomSettings={hasCustomSettings}
           themeColors={colors}
           difficultyColors={DIFFICULTY_COLORS}
-          onPress={() => goToPlay(navigation, 'sequential')}
+          onPress={handleQuickPlayPress}
         />
 
         {/* Settings Link */}
@@ -538,88 +844,112 @@ const HomeScreen: React.FC = () => {
           onPress={() => navigation.navigate('Settings')}
         />
 
-        {/* ✅ SINGLE Daily Animal Fact Section - NO DUPLICATE TITLE */}
+        {/* Daily Animal Fact Section */}
         <View style={styles.factSectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-            🐘 Daily Animal Fact
+            {renderSafeText('🐘 Daily Animal Fact')}
           </Text>
           {factData.animalName && !factData.loading && (
             <Text style={[styles.animalNameBadge, { 
-              color: colors.text, 
+              color: getContrastColor(colors.button), 
               backgroundColor: colors.button 
             }]}>
-              {factData.animalName}
+              {renderSafeText(factData.animalName)}
             </Text>
           )}
         </View>
         
         <FactCard
-          fact={factData.displayFact}
+          fact={renderSafeText(factData.displayFact)}
           themeColors={colors}
           isLoading={factData.loading}
           onRefresh={handleRefreshFact}
         />
 
-        {/* Recent Achievements */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Achievements</Text>
+        {/* Achievements */}
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {renderSafeText('Achievements')}
+        </Text>
         <AchievementsList
-          trophies={getFreshTrophies()}
+          trophies={achievements}
           themeColors={colors}
         />
 
         {/* Stats Summary */}
         <StatsSummary
-          stats={getFreshStats()}
-          unlockedTrophiesCount={0}
+          stats={{
+            puzzlesSolved: homeStats.puzzlesSolved || 0,
+            accuracy: homeStats.accuracy || 0,
+            currentStreak: homeStats.currentStreak || 0,
+          }}
+          unlockedTrophiesCount={homeStats.trophies || 0}
           themeColors={colors}
         />
 
         {/* Challenge Status Summary */}
-        <View style={[styles.statusSummary, { backgroundColor: colors.button }]}>
+        <View style={[styles.statusSummary, { backgroundColor: `${colors.button}20` }]}>
           <Text style={[styles.statusTitle, { color: colors.text }]}>
-            📊 Live Challenge Status
+            {renderSafeText('📊 Live Challenge Status')}
           </Text>
           <View style={styles.statusGrid}>
             <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>Daily Players</Text>
-              <Text style={[styles.statusValue, { color: colors.text }]}>
-                {dailyChallenge.loading ? '...' : dailyChallenge.players}
+              <Text style={[styles.statusLabel, { color: colors.text }]}>
+                {renderSafeText('Daily Players')}
               </Text>
+              <View>
+                <Text style={[styles.statusValue, { color: colors.text }]}>
+                  {dailyChallenge.loading ? '...' : renderSafeText(dailyChallenge.players)}
+                </Text>
+              </View>
             </View>
             <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>Weekly Players</Text>
-              <Text style={[styles.statusValue, { color: colors.text }]}>
-                {weeklyChallenge.loading ? '...' : weeklyChallenge.players}
+              <Text style={[styles.statusLabel, { color: colors.text }]}>
+                {renderSafeText('Weekly Players')}
               </Text>
+              <View>
+                <Text style={[styles.statusValue, { color: colors.text }]}>
+                  {weeklyChallenge.loading ? '...' : renderSafeText(weeklyChallenge.players)}
+                </Text>
+              </View>
             </View>
             <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>Daily Ends In</Text>
-              <Text style={[
-                styles.timerValue, 
-                { 
-                  color: dailyChallenge.isUrgent ? '#FF5722' : colors.text,
-                  fontWeight: dailyChallenge.isUrgent ? 'bold' : 'normal'
-                }
-              ]}>
-                {dailyChallenge.remainingTime}
+              <Text style={[styles.statusLabel, { color: colors.text }]}>
+                {renderSafeText('Daily Ends In')}
               </Text>
+              <View>
+                <Text style={[
+                  styles.timerValue, 
+                  { 
+                    color: dailyChallenge.isUrgent ? '#FF5722' : colors.text,
+                    fontWeight: dailyChallenge.isUrgent ? 'bold' : 'normal'
+                  }
+                ]}>
+                  {renderSafeText(dailyChallenge.remainingTime)}
+                </Text>
+              </View>
             </View>
             <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>Weekly Ends In</Text>
-              <Text style={[
-                styles.timerValue, 
-                { 
-                  color: weeklyChallenge.isUrgent ? '#FF5722' : colors.text,
-                  fontWeight: weeklyChallenge.isUrgent ? 'bold' : 'normal'
-                }
-              ]}>
-                {weeklyChallenge.remainingTime}
+              <Text style={[styles.statusLabel, { color: colors.text }]}>
+                {renderSafeText('Weekly Ends In')}
               </Text>
+              <View>
+                <Text style={[
+                  styles.timerValue, 
+                  { 
+                    color: weeklyChallenge.isUrgent ? '#FF5722' : colors.text,
+                    fontWeight: weeklyChallenge.isUrgent ? 'bold' : 'normal'
+                  }
+                ]}>
+                  {renderSafeText(weeklyChallenge.remainingTime)}
+                </Text>
+              </View>
             </View>
           </View>
-          <Text style={[styles.statusNote, { color: colors.text, opacity: 0.7 }]}>
-            Updates every 30 seconds • Times shown in your local timezone
-          </Text>
+          <View>
+            <Text style={[styles.statusNote, { color: colors.text, opacity: 0.7 }]}>
+              {renderSafeText('Updates every second • UTC-based timing')}
+            </Text>
+          </View>
         </View>
 
         {/* Footer */}

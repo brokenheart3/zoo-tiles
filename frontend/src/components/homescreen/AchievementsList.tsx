@@ -1,20 +1,41 @@
+// src/components/homescreen/AchievementsList.tsx
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 
-type Trophy = {
+type Achievement = {
+  id: number;
   icon: string;
   name: string;
-  unlockDate?: string;
+  description: string;
   unlocked: boolean;
+  progress: number;
+  unlockDate?: string;
 };
 
 type AchievementsListProps = {
-  trophies: Trophy[];
+  trophies: Achievement[];
   themeColors: any;
 };
 
 const AchievementsList: React.FC<AchievementsListProps> = ({ trophies, themeColors }) => {
-  const unlockedTrophies = trophies?.filter(t => t.unlocked) || [];
+  // Safety check - ensure trophies is an array
+  if (!trophies || !Array.isArray(trophies)) {
+    console.log('❌ AchievementsList: trophies is not an array', trophies);
+    return (
+      <View style={[styles.emptyAchievements, { backgroundColor: themeColors.button }]}>
+        <Text style={[styles.emptyAchievementsText, { color: themeColors.text }]}>
+          🏆 Loading achievements...
+        </Text>
+      </View>
+    );
+  }
+
+  // Filter unlocked trophies
+  const unlockedTrophies = trophies.filter(t => t.unlocked === true);
+  
+  console.log('🏆 AchievementsList - Total trophies:', trophies.length);
+  console.log('🏆 AchievementsList - Unlocked trophies:', unlockedTrophies.length);
+  console.log('🏆 AchievementsList - First trophy:', trophies[0]);
 
   if (unlockedTrophies.length === 0) {
     return (
@@ -22,6 +43,26 @@ const AchievementsList: React.FC<AchievementsListProps> = ({ trophies, themeColo
         <Text style={[styles.emptyAchievementsText, { color: themeColors.text }]}>
           🏆 No achievements yet. Complete puzzles to earn trophies!
         </Text>
+        {/* Show a few locked achievements as preview */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 15 }}>
+          {trophies.slice(0, 3).map((trophy, index) => (
+            <View 
+              key={index} 
+              style={[styles.trophyCard, { backgroundColor: themeColors.button + '80', opacity: 0.5 }]}
+            >
+              <Text style={styles.trophyEmoji}>{trophy.icon}</Text>
+              <Text style={[styles.trophyName, { color: themeColors.text }]}>{trophy.name}</Text>
+              <View style={styles.progressBar}>
+                <View 
+                  style={[
+                    styles.progressFill, 
+                    { width: `${trophy.progress * 100}%`, backgroundColor: '#4CAF50' }
+                  ]} 
+                />
+              </View>
+            </View>
+          ))}
+        </ScrollView>
       </View>
     );
   }
@@ -32,9 +73,9 @@ const AchievementsList: React.FC<AchievementsListProps> = ({ trophies, themeColo
       showsHorizontalScrollIndicator={false} 
       style={styles.achievementsScroll}
     >
-      {unlockedTrophies.slice(0, 5).map((trophy, index) => (
+      {unlockedTrophies.map((trophy) => (
         <View 
-          key={index} 
+          key={trophy.id} 
           style={[styles.trophyCard, { backgroundColor: themeColors.button }]}
         >
           <Text style={styles.trophyEmoji}>{trophy.icon}</Text>
@@ -90,6 +131,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     opacity: 0.8,
+  },
+  progressBar: {
+    width: '100%',
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 2,
+    marginTop: 5,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
   },
 });
 

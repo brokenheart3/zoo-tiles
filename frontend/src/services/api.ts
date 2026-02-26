@@ -42,46 +42,108 @@ const axiosConfig = {
 };
 
 const loadJson = async <T>(url: string): Promise<T> => {
-  console.log('📡 API:', url);
-  const { data } = await axios.get<T>(url, axiosConfig);
-  return data;
+  console.log('📡 API Request:', url);
+  try {
+    const { data } = await axios.get<T>(url, axiosConfig);
+    return data;
+  } catch (error) {
+    console.error('❌ API Request failed:', url, error);
+    throw error;
+  }
 };
 
 // ============================
-// CORE: GET RANDOM PUZZLE FROM REPO
+// HELPER: Map difficulty to folder name
+// ============================
+const getDifficultyFolder = (difficulty: string): string => {
+  console.log('🔧 getDifficultyFolder - Input:', difficulty);
+  
+  // Convert to lowercase and trim
+  const difficultyLower = difficulty?.toLowerCase().trim() || 'easy';
+  console.log('🔧 getDifficultyFolder - Lowercase:', difficultyLower);
+  
+  let folder = 'easy'; // default
+  
+  switch (difficultyLower) {
+    case 'easy':
+      folder = 'easy';
+      break;
+    case 'medium':
+      folder = 'medium';
+      break;
+    case 'hard':
+      folder = 'hard';
+      break;
+    case 'expert':
+      folder = 'expert';
+      break;
+    default:
+      console.log('🔧 getDifficultyFolder - Unknown difficulty, using easy');
+      folder = 'easy';
+  }
+  
+  console.log('🔧 getDifficultyFolder - Selected folder:', folder);
+  return folder;
+};
+
+// ============================
+// CORE: GET RANDOM PUZZLE FROM REPO BY DIFFICULTY
 // ============================
 
-async function getPuzzleFromRepo(size: number): Promise<PuzzleResponse> {
-  // 1) Read index.json to know files
-  const indexUrl = `${BASE_URL}/${size}/easy/index.json`;
-  const index = await loadJson<any>(indexUrl);
-
-  const files = index.files;
-
-  // 2) Pick random file
-  const randomFile =
-    files[Math.floor(Math.random() * files.length)].file;
-
-  // 3) Load that file (contains 10,000 puzzles)
-  const fileUrl = `${BASE_URL}/${size}/easy/${randomFile}`;
-  const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
-
-  // 4) Pick one puzzle inside
-  const puzzle =
-    puzzles[Math.floor(Math.random() * puzzles.length)];
-
-  return puzzle;
+async function getPuzzleFromRepo(size: number, difficulty: string): Promise<PuzzleResponse> {
+  const difficultyFolder = getDifficultyFolder(difficulty);
+  
+  console.log('========== DEBUG ==========');
+  console.log('1. Trying to fetch:', `${BASE_URL}/${size}/${difficultyFolder}/index.json`);
+  
+  try {
+    const indexUrl = `${BASE_URL}/${size}/${difficultyFolder}/index.json`;
+    const index = await loadJson<any>(indexUrl);
+    console.log('2. Index loaded successfully:', index);
+    
+    const files = index.files;
+    console.log('3. Files array:', files);
+    
+    if (files && files.length > 0) {
+      const randomIndex = Math.floor(Math.random() * files.length);
+      const randomFile = files[randomIndex].file;
+      console.log('4. Selected file:', randomFile);
+      
+      const fileUrl = `${BASE_URL}/${size}/${difficultyFolder}/${randomFile}`;
+      console.log('5. Fetching puzzle file:', fileUrl);
+      
+      const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
+      console.log('6. Loaded puzzles count:', puzzles?.length);
+      
+      if (puzzles && puzzles.length > 0) {
+        const puzzleIndex = Math.floor(Math.random() * puzzles.length);
+        const puzzle = puzzles[puzzleIndex];
+        console.log('7. Selected puzzle:', puzzle);
+        console.log('=========================');
+        return puzzle;
+      }
+    }
+    throw new Error('No files or puzzles found');
+  } catch (error) {
+    console.log('❌ ERROR:', error);
+    console.log('=========================');
+    throw error;
+  }
 }
 
 // ============================
-// 1️⃣ SEQUENTIAL
+// 1️⃣ SEQUENTIAL - ACCEPTS DIFFICULTY
 // ============================
 
 export async function fetchSequentialPuzzle(
-  size: number
+  size: number,
+  difficulty: string = 'easy'
 ): Promise<PuzzleResponse | null> {
+  console.log('🎮 fetchSequentialPuzzle - Called with:', { size, difficulty });
   try {
-    return await getPuzzleFromRepo(size);
+    const puzzle = await getPuzzleFromRepo(size, difficulty);
+    console.log('🎮 fetchSequentialPuzzle - Success');
+    return puzzle;
   } catch (err) {
     console.error('❌ Sequential fetch failed:', err);
     return null;
@@ -89,69 +151,107 @@ export async function fetchSequentialPuzzle(
 }
 
 // ============================
-// 2️⃣ DAILY
+// 2️⃣ DAILY - ACCEPTS DIFFICULTY
 // ============================
 
 export async function fetchDailyChallenge(
-  size: number
+  size: number,
+  difficulty: string = 'easy'
 ): Promise<PuzzleResponse | null> {
+  console.log('📅 fetchDailyChallenge - Called with:', { size, difficulty });
   try {
-    // get all puzzles
-    const indexUrl = `${BASE_URL}/${size}/easy/index.json`;
+    const difficultyFolder = getDifficultyFolder(difficulty);
+    
+    // Get all puzzles for this difficulty
+    const indexUrl = `${BASE_URL}/${size}/${difficultyFolder}/index.json`;
+    console.log('📅 Loading daily index from:', indexUrl);
+    
     const index = await loadJson<any>(indexUrl);
     const files = index.files;
 
-    // pick a file deterministically using today's date
-    const dayOfYear = Math.floor(
-      (new Date().getTime() - new Date(new Date().getFullYear(), 0, 0).getTime()) /
-      (1000 * 60 * 60 * 24)
-    );
-    const file = files[dayOfYear % files.length].file;
+    // Calculate day of year for deterministic selection
+    const now = new Date();
+    const start = new Date(now.getFullYear(), 0, 0);
+    const diff = now.getTime() - start.getTime();
+    const oneDay = 1000 * 60 * 60 * 24;
+    const dayOfYear = Math.floor(diff / oneDay);
+    
+    console.log('📅 Day of year:', dayOfYear);
 
-    const fileUrl = `${BASE_URL}/${size}/easy/${file}`;
+    // Pick file deterministically
+    const fileIndex = dayOfYear % files.length;
+    const file = files[fileIndex].file;
+    console.log(`📅 Selected file ${fileIndex + 1}/${files.length}:`, file);
+
+    // Load puzzles from file
+    const fileUrl = `${BASE_URL}/${size}/${difficultyFolder}/${file}`;
     const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
 
-    // pick a puzzle deterministically using dayOfYear
-    const puzzle = puzzles[dayOfYear % puzzles.length];
+    // Pick puzzle deterministically
+    const puzzleIndex = dayOfYear % puzzles.length;
+    const puzzle = puzzles[puzzleIndex];
+    
+    console.log(`📅 Selected puzzle ${puzzleIndex + 1}/${puzzles.length}`);
+    console.log('✅ Daily puzzle loaded');
+    
     return puzzle;
   } catch (err) {
     console.error('❌ Daily fetch failed:', err);
-    return null;
+    
+    // Fallback to sequential if daily fails
+    console.log('📅 Falling back to sequential puzzle');
+    return fetchSequentialPuzzle(size, difficulty);
   }
 }
 
 // ============================
-// 3️⃣ WEEKLY
+// 3️⃣ WEEKLY - ACCEPTS DIFFICULTY
 // ============================
 
 export async function fetchWeeklyChallenge(
-  size: number
+  size: number,
+  difficulty: string = 'easy'
 ): Promise<PuzzleResponse | null> {
+  console.log('📆 fetchWeeklyChallenge - Called with:', { size, difficulty });
   try {
-    const indexUrl = `${BASE_URL}/${size}/easy/index.json`;
+    const difficultyFolder = getDifficultyFolder(difficulty);
+    
+    const indexUrl = `${BASE_URL}/${size}/${difficultyFolder}/index.json`;
+    console.log('📆 Loading weekly index from:', indexUrl);
+    
     const index = await loadJson<any>(indexUrl);
     const files = index.files;
 
-    // calculate week number
+    // Calculate week number
     const now = new Date();
     const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
     const pastDaysOfYear = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
     const weekNumber = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+    
+    console.log('📆 Week number:', weekNumber);
 
-    const file = files[weekNumber % files.length].file;
+    // Pick file deterministically
+    const fileIndex = weekNumber % files.length;
+    const file = files[fileIndex].file;
+    console.log(`📆 Selected file ${fileIndex + 1}/${files.length}:`, file);
 
-    const fileUrl = `${BASE_URL}/${size}/easy/${file}`;
+    // Load puzzles from file
+    const fileUrl = `${BASE_URL}/${size}/${difficultyFolder}/${file}`;
     const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
 
-    // pick first puzzle of the file for weekly
+    // Pick first puzzle for weekly
     const puzzle = puzzles[0];
+    console.log('✅ Weekly puzzle loaded');
+    
     return puzzle;
   } catch (err) {
     console.error('❌ Weekly fetch failed:', err);
-    return null;
+    
+    // Fallback to sequential if weekly fails
+    console.log('📆 Falling back to sequential puzzle');
+    return fetchSequentialPuzzle(size, difficulty);
   }
 }
-
 
 // ============================
 // 4️⃣ ANIMAL FACTS
@@ -160,6 +260,7 @@ export async function fetchWeeklyChallenge(
 export async function fetchAnimalFacts(): Promise<Fact[] | null> {
   try {
     const url = `${BASE_URL}/facts/animals_fact.json`;
+    console.log('📚 Fetching animal facts from:', url);
     return await loadJson<Fact[]>(url);
   } catch (err) {
     console.error('❌ Facts fetch failed:', err);
@@ -187,7 +288,7 @@ export async function fetchDailyAnimalFact(): Promise<string | null> {
     const fact =
       animal.facts[currentIndex.factIdx % animal.facts.length];
 
-    // update index
+    // Update index for next time
     currentIndex.animalIdx++;
     if (currentIndex.animalIdx >= animals.length) {
       currentIndex.animalIdx = 0;
@@ -199,7 +300,10 @@ export async function fetchDailyAnimalFact(): Promise<string | null> {
       JSON.stringify(currentIndex)
     );
 
-    return `${animal.name}: ${fact}`;
+    const factString = `${animal.name}: ${fact}`;
+    console.log('📚 Daily fact:', factString);
+    
+    return factString;
   } catch (err) {
     console.error('❌ Daily fact failed:', err);
     return null;

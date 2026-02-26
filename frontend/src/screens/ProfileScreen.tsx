@@ -1,5 +1,5 @@
 // screens/ProfileScreen.tsx
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useNavigation } from '@react-navigation/native';
@@ -27,6 +28,10 @@ const ProfileScreen = () => {
   const { profile, getUnlockedTrophies, getLockedTrophies, isLoading } = useProfile();
   const { user, signOut } = useAuth();
   const colors = themeStyles[theme];
+  
+  // State for custom modal
+  const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   if (isLoading || !profile) {
     return (
@@ -43,25 +48,19 @@ const ProfileScreen = () => {
     navigation.navigate('EditProfile', { userData: profile });
   };
 
-  const handleSignOut = async () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await signOut();
-            } catch {
-              Alert.alert('Error', 'Failed to sign out');
-            }
-          },
-        },
-      ]
-    );
+  const handleSignOutConfirmed = async () => {
+    setIsSigningOut(true);
+    try {
+      await signOut();
+    } catch (error: any) {
+      setIsSigningOut(false);
+      setShowSignOutModal(false);
+      Alert.alert('Error', error?.message || 'Failed to sign out');
+    }
+  };
+
+  const handleSignOut = () => {
+    setShowSignOutModal(true);
   };
 
   const mergedProfile = {
@@ -83,15 +82,12 @@ const ProfileScreen = () => {
   const unlockedTrophies = getUnlockedTrophies?.() || [];
   const lockedTrophies = getLockedTrophies?.() || [];
 
-  // ✅ Updated render function for trophies
   const renderTrophyItem = ({ item }: { item: Trophy }) => {
-    // Convert requirement object to readable string
     let requirementText = '';
     if (item.requirement) {
       if (typeof item.requirement === 'string') {
         requirementText = item.requirement;
       } else if ('type' in item.requirement && 'value' in item.requirement) {
-        // e.g., { type: 'puzzles_completed', value: 10 }
         requirementText = `${item.requirement.value} ${item.requirement.type.replace('_', ' ')}`;
       }
     }
@@ -129,6 +125,48 @@ const ProfileScreen = () => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Sign Out Confirmation Modal */}
+      <Modal
+        visible={showSignOutModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => !isSigningOut && setShowSignOutModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Sign Out</Text>
+            <Text style={[styles.modalMessage, { color: colors.text }]}>
+              Are you sure you want to sign out?
+            </Text>
+            
+            {isSigningOut ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator size="large" color={colors.button} />
+                <Text style={[styles.modalLoadingText, { color: colors.text }]}>
+                  Signing out...
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: colors.button }]}
+                  onPress={() => setShowSignOutModal(false)}
+                >
+                  <Text style={[styles.modalButtonText, { color: colors.text }]}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: '#f44336' }]}
+                  onPress={handleSignOutConfirmed}
+                >
+                  <Text style={[styles.modalButtonText, { color: 'white' }]}>Sign Out</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.button }]}>
@@ -203,11 +241,29 @@ const ProfileScreen = () => {
           >
             <Text style={[styles.editButtonText, { color: colors.text }]}>Edit Profile</Text>
           </TouchableOpacity>
+          
           <TouchableOpacity
-            style={[styles.signOutButton, { borderColor: colors.button }]}
+            style={[
+              styles.signOutButton, 
+              { 
+                backgroundColor: '#f44336',
+                borderWidth: 0,
+                paddingVertical: 16,
+                paddingHorizontal: 20,
+                borderRadius: 12,
+                marginTop: 10,
+              }
+            ]}
             onPress={handleSignOut}
           >
-            <Text style={[styles.signOutButtonText, { color: colors.button }]}>Sign Out</Text>
+            <Text style={{ 
+              color: 'white', 
+              fontSize: 18, 
+              fontWeight: 'bold',
+              textAlign: 'center' 
+            }}>
+              SIGN OUT
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -267,8 +323,59 @@ const styles = StyleSheet.create({
   editButtonText: { fontSize: 18, fontWeight: 'bold' },
   signOutButton: { paddingVertical: 16, borderRadius: 12, alignItems: 'center', borderWidth: 2 },
   signOutButtonText: { fontSize: 18, fontWeight: 'bold' },
+  
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '80%',
+    padding: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  modalMessage: {
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+  },
+  modalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  modalLoading: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalLoadingText: {
+    marginTop: 10,
+    fontSize: 14,
+  },
 });
 
 export default ProfileScreen;
-
-

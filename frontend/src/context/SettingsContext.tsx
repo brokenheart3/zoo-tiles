@@ -1,3 +1,4 @@
+// src/context/SettingsContext.tsx
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -27,7 +28,8 @@ const defaultSettings: AppSettings = {
   hapticFeedback: true,
 };
 
-const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
+// EXPORT this context!
+export const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);

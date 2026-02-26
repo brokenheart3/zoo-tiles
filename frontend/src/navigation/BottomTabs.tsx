@@ -1,3 +1,4 @@
+// src/navigation/BottomTabs.tsx
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
@@ -5,7 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import HomeScreen from "../screens/HomeScreen";
 import PlayScreen from "../screens/PlayScreen";
 import ChallengeScreen from "../screens/ChallengeScreen";
-import StatsScreen from "../screens/StatsScreen";
+import StatsScreen from "../screens/StatsScreen"; // Make sure this import is correct
 import SettingsStack from "./SettingsStack";
 
 const Tab = createBottomTabNavigator();

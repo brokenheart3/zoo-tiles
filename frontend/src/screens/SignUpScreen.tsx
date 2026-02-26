@@ -21,15 +21,21 @@ type SignUpScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 
 
 const SignUpScreen = () => {
   const navigation = useNavigation<SignUpScreenNavigationProp>();
-  const { signUpWithEmail } = useAuth();
+  const { signUpWithEmail, signInWithGoogle, signInWithApple } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSignUp = async () => {
-    if (!email || !password || !username) {
+    if (!email || !password || !confirmPassword || !username) {
       Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert('Error', 'Passwords do not match');
       return;
     }
 
@@ -41,9 +47,30 @@ const SignUpScreen = () => {
     setLoading(true);
     try {
       await signUpWithEmail(email, password, username);
-      Alert.alert('Success', 'Account created successfully!');
     } catch (error: any) {
       Alert.alert('Sign Up Failed', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    setLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch (error: any) {
+      Alert.alert('Google Sign Up Failed', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleSignUp = async () => {
+    setLoading(true);
+    try {
+      await signInWithApple();
+    } catch (error: any) {
+      Alert.alert('Apple Sign Up Failed', error.message);
     } finally {
       setLoading(false);
     }
@@ -56,8 +83,8 @@ const SignUpScreen = () => {
     >
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Join Zootiles today!</Text>
+          <Text style={styles.title}>Zootiles</Text>
+          <Text style={styles.subtitle}>Create your account</Text>
         </View>
 
         <View style={styles.form}>
@@ -69,7 +96,7 @@ const SignUpScreen = () => {
             autoCapitalize="none"
             editable={!loading}
           />
-          
+
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -82,9 +109,18 @@ const SignUpScreen = () => {
           
           <TextInput
             style={styles.input}
-            placeholder="Password (min. 6 characters)"
+            placeholder="Password"
             value={password}
             onChangeText={setPassword}
+            secureTextEntry
+            editable={!loading}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Confirm Password"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
             secureTextEntry
             editable={!loading}
           />
@@ -97,13 +133,39 @@ const SignUpScreen = () => {
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Create Account</Text>
+              <Text style={styles.buttonText}>Sign Up</Text>
             )}
           </TouchableOpacity>
 
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Google Sign Up Button */}
+          <TouchableOpacity
+            style={[styles.googleButton, loading && styles.buttonDisabled]}
+            onPress={handleGoogleSignUp}
+            disabled={loading}
+          >
+            <Text style={styles.googleButtonText}>Sign up with Google</Text>
+          </TouchableOpacity>
+
+          {/* Apple Sign Up Button (iOS only) */}
+          {Platform.OS === 'ios' && (
+            <TouchableOpacity
+              style={[styles.appleButton, loading && styles.buttonDisabled]}
+              onPress={handleAppleSignUp}
+              disabled={loading}
+            >
+              <Text style={styles.appleButtonText}>Sign up with Apple</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity 
             style={styles.linkButton}
-            onPress={() => navigation.goBack()}
+            onPress={() => navigation.navigate('SignIn')}
             disabled={loading}
           >
             <Text style={styles.linkText}>Already have an account? Sign In</Text>
@@ -121,6 +183,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center',
     paddingHorizontal: 24,
     paddingVertical: 32,
   },
@@ -129,7 +192,7 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
     color: '#007AFF',
     marginBottom: 8,
@@ -168,9 +231,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#ddd',
+  },
+  dividerText: {
+    color: '#666',
+    paddingHorizontal: 16,
+    fontSize: 14,
+  },
+  googleButton: {
+    backgroundColor: '#4285F4',
+    height: 48,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  googleButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  appleButton: {
+    backgroundColor: '#000',
+    height: 48,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  appleButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   linkButton: {
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 8,
   },
   linkText: {
     color: '#007AFF',

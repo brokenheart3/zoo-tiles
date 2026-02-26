@@ -11,11 +11,14 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Platform,
+  Modal,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import { auth } from '@/services/firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
 
 type SignInScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'SignIn'>;
 
@@ -25,6 +28,15 @@ const SignInScreen = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // ADD THIS DEBUG CODE RIGHT HERE 👇
+  console.log('🔍 Google Web Client ID exists:', !!process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+  console.log('🔍 Loading state:', loading);
+  
+  // Reset password state
+  const [resetModalVisible, setResetModalVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleEmailSignIn = async () => {
     if (!email || !password) {
@@ -43,14 +55,63 @@ const SignInScreen = () => {
   };
 
   const handleGoogleSignIn = async () => {
+    console.log('🔍 Google Sign-In button pressed');
     setLoading(true);
     try {
       await signInWithGoogle();
+      console.log('✅ Google Sign-In successful');
     } catch (error: any) {
+      console.error('❌ Google Sign-In error:', error);
       Alert.alert('Google Sign In Failed', error.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Replace the handleResetPassword function with this debug version:
+
+  const handleResetPassword = async () => {
+    if (!resetEmail) {
+      Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+
+    console.log('🔍 Attempting to reset password for:', resetEmail);
+    setResetLoading(true);
+    
+    try {
+      // Log before sending
+      console.log('📤 Sending reset email...');
+      
+      const result = await sendPasswordResetEmail(auth, resetEmail);
+      
+      console.log('✅ Reset email sent successfully', result);
+      
+      Alert.alert(
+        'Success',
+        `Reset email sent to ${resetEmail}. Check your inbox (and spam folder).`
+      );
+      
+      setResetModalVisible(false);
+      setResetEmail('');
+      
+    } catch (error: any) {
+      console.error('❌ Full error object:', error);
+      console.error('❌ Error code:', error.code);
+      console.error('❌ Error message:', error.message);
+      
+      Alert.alert(
+        'Error Details',
+        `Code: ${error.code || 'unknown'}\nMessage: ${error.message}`
+      );
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const openResetModal = () => {
+    setResetEmail(email); // Pre-fill with email from sign-in form
+    setResetModalVisible(true);
   };
 
   return (
@@ -58,6 +119,55 @@ const SignInScreen = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
+      {/* Reset Password Modal */}
+      <Modal
+        visible={resetModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => !resetLoading && setResetModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Reset Password</Text>
+            <Text style={styles.modalSubtitle}>
+              Enter your email address and we'll send you instructions to reset your password.
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Email"
+              value={resetEmail}
+              onChangeText={setResetEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              editable={!resetLoading}
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setResetModalVisible(false)}
+                disabled={resetLoading}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalResetButton, resetLoading && styles.buttonDisabled]}
+                onPress={handleResetPassword}
+                disabled={resetLoading}
+              >
+                {resetLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalResetButtonText}>Send Reset Email</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.title}>Zootiles</Text>
@@ -83,6 +193,15 @@ const SignInScreen = () => {
             secureTextEntry
             editable={!loading}
           />
+
+          {/* Forgot Password Link */}
+          <TouchableOpacity 
+            style={styles.forgotPasswordButton}
+            onPress={openResetModal}
+            disabled={loading}
+          >
+            <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -171,6 +290,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
     marginBottom: 16,
   },
+  forgotPasswordButton: {
+    alignSelf: 'flex-end',
+    marginBottom: 16,
+  },
+  forgotPasswordText: {
+    color: '#007AFF',
+    fontSize: 14,
+  },
   button: {
     backgroundColor: '#007AFF',
     height: 50,
@@ -232,6 +359,77 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   appleButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '85%',
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 24,
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modalInput: {
+    width: '100%',
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    backgroundColor: '#f9f9f9',
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  modalButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 6,
+  },
+  modalCancelButton: {
+    backgroundColor: '#f0f0f0',
+  },
+  modalCancelButtonText: {
+    color: '#666',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalResetButton: {
+    backgroundColor: '#007AFF',
+  },
+  modalResetButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',

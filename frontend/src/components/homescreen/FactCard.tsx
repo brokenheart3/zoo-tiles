@@ -40,31 +40,6 @@ const FactCard: React.FC<FactCardProps> = ({
 
   return (
     <View style={[styles.factCard, { backgroundColor: themeColors.button }]}>
-      <View style={styles.factHeader}>
-        <View style={styles.titleContainer}>
-          <Text style={styles.factEmoji}>{getEmoji()}</Text>
-          <Text style={[styles.factTitle, { color: themeColors.text }]}>
-            Daily Animal Fact
-          </Text>
-        </View>
-        
-        {onRefresh && (
-          <TouchableOpacity 
-            style={[styles.refreshButton, { backgroundColor: themeColors.text + '20' }]}
-            onPress={onRefresh}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator size="small" color={themeColors.text} />
-            ) : (
-              <Text style={[styles.refreshText, { color: themeColors.text }]}>
-                🔄
-              </Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-      
       {isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color={themeColors.text} />
@@ -74,9 +49,27 @@ const FactCard: React.FC<FactCardProps> = ({
         </View>
       ) : (
         <>
-          <Text style={[styles.factText, { color: themeColors.text }]}>
-            {getFactText()}
-          </Text>
+          <View style={styles.factRow}>
+            <Text style={[styles.factText, { color: themeColors.text }]}>
+              {getFactText()}
+            </Text>
+            {onRefresh && (
+              <TouchableOpacity 
+                style={[styles.refreshButton, { backgroundColor: themeColors.text + '20' }]}
+                onPress={onRefresh}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color={themeColors.text} />
+                ) : (
+                  <Text style={[styles.refreshText, { color: themeColors.text }]}>
+                    🔄
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+          
           <View style={styles.factFooter}>
             <Text style={[styles.factSource, { color: themeColors.text }]}>
               📚 From Zoo-Tiles Animal Database
@@ -103,34 +96,6 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
-  factHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  factEmoji: {
-    fontSize: 22,
-    marginRight: 10,
-  },
-  factTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  refreshButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  refreshText: {
-    fontSize: 16,
-  },
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -142,11 +107,31 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     opacity: 0.8,
   },
+  factRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  factEmoji: {
+    fontSize: 22,
+    marginRight: 10,
+  },
   factText: {
+    flex: 1,
     fontSize: 15,
     lineHeight: 22,
     opacity: 0.95,
-    marginBottom: 15,
+  },
+  refreshButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 10,
+  },
+  refreshText: {
+    fontSize: 16,
   },
   factFooter: {
     flexDirection: 'row',
@@ -165,4 +150,3 @@ const styles = StyleSheet.create({
 });
 
 export default FactCard;
-

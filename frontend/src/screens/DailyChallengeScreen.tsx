@@ -1,4 +1,7 @@
-import React, { useContext, useState, useEffect } from "react";
+// src/screens/DailyChallengeScreen.tsx
+import React, { useContext, useState, useEffect, useRef, useMemo } from "react";
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
+import { db } from '../services/firebase';
 import {
   View,
   Text,
@@ -7,14 +10,28 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemeContext, themeStyles } from "../context/ThemeContext";
 import { useSettings } from "../context/SettingsContext";
 import { useProfile } from "../context/ProfileContext";
+import { getChallengePlayerCount } from "../services/simpleChallengeService";
+import { getUserChallengeResult, getPlayerRank } from "../services/userService";
+import { 
+  getTimeRemaining, 
+  getUTCDateString,
+  isDailyChallengeActive,
+  formatDate, 
+  formatTime,
+  getDayName as getDayNameFromUtils,
+  getUTCDateStringForTimestamp,
+  isChallengeCrossingMidnight,
+} from "../utils/timeUtils";
+import { auth } from "../services/firebase";
 import AppFooter from "../components/common/AppFooter";
+import ChallengeLeaderboard from "../components/challenges/ChallengeLeaderboard";
 
 type RootStackParamList = {
   Play: {
@@ -22,12 +39,70 @@ type RootStackParamList = {
     difficulty: 'Expert';
     challengeType: 'daily';
     challengeId?: string;
-    key?: string; // Added unique key for fresh game
+    startTime?: number;
+    key?: string;
   };
   Home: undefined;
+  ChallengeResults: {
+    challengeId: string;
+    challengeType: 'daily';
+    time?: number;
+    isPerfect?: boolean;
+    moves?: number;
+    correctMoves?: number;
+    wrongMoves?: number;
+    accuracy?: number;
+    completed?: boolean;
+    completedAt?: string;
+  };
 };
 
 type DailyChallengeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Play'>;
+
+// Helper to get previous day name in UTC
+const getPreviousDayName = (daysAgo: number): string => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - daysAgo);
+  return getDayNameFromUtils(date);
+};
+
+// Helper to get UTC date string for days ago
+const getPreviousUTCDateString = (daysAgo: number): string => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - daysAgo);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Helper to get rank display with ordinal suffix
+const getRankDisplay = (rank: number | null): string => {
+  if (!rank) return '—';
+  if (rank === 1) return '🥇 1st';
+  if (rank === 2) return '🥈 2nd';
+  if (rank === 3) return '🥉 3rd';
+  
+  // Add ordinal suffix
+  if (rank % 10 === 1 && rank % 100 !== 11) return `${rank}st`;
+  if (rank % 10 === 2 && rank % 100 !== 12) return `${rank}nd`;
+  if (rank % 10 === 3 && rank % 100 !== 13) return `${rank}rd`;
+  return `${rank}th`;
+};
+
+// Helper to show timezone info
+const showTimezoneInfo = () => {
+  const now = new Date();
+  Alert.alert(
+    '🌍 How Daily Challenges Work',
+    `• All players worldwide see the SAME daily challenge\n` +
+    `• Challenge resets at UTC midnight (00:00 UTC)\n` +
+    `• Your local time: ${now.toLocaleString()}\n` +
+    `• UTC time: ${now.toUTCString()}\n` +
+    `• Today's challenge ID: daily-${getUTCDateString()}\n\n` +
+    `This ensures fair competition across all time zones!`
+  );
+};
 
 const DailyChallengeScreen = () => {
   const navigation = useNavigation<DailyChallengeScreenNavigationProp>();
@@ -38,79 +113,260 @@ const DailyChallengeScreen = () => {
   const colors = themeStyles[theme];
   
   const [loading, setLoading] = useState(true);
-  const [challengeData, setChallengeData] = useState({
-    id: 'daily-' + new Date().toISOString().split('T')[0],
-    title: 'Daily Jungle Adventure',
-    description: 'Complete today\'s expert-level animal puzzle',
-    gridSize: settings.gridSize || '8x8',
-    difficulty: 'Expert' as const,
-    reward: 150,
-    participants: 2456,
-    timeRemaining: calculateTimeRemaining(),
-    completed: false,
-    bestTime: null as number | null,
-    attempts: 0,
-    previousPuzzles: [
-      { date: 'Yesterday', completed: true, time: 245 },
-      { date: '2 days ago', completed: true, time: 312 },
-      { date: '3 days ago', completed: true, time: 198 },
-    ],
-  });
+  const [playerCount, setPlayerCount] = useState(0);
+  const [hasPlayed, setHasPlayed] = useState(false);
+  const [challengeResult, setChallengeResult] = useState<any>(null);
+  const [attempts, setAttempts] = useState(0);
+  const [userRank, setUserRank] = useState<number | null>(null);
+  const [forceUpdate, setForceUpdate] = useState<number>(0);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  
+  const timeUpdateRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Use UTC date for challenge ID to ensure consistency across time zones
+  const challengeId = `daily-${getUTCDateString()}`;
+  const challengeActive = isDailyChallengeActive();
 
-  function calculateTimeRemaining() {
-    const now = new Date();
-    const midnight = new Date(now);
-    midnight.setHours(24, 0, 0, 0);
-    const diff = midnight.getTime() - now.getTime();
-    
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-    
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  }
+  // Get previous 3 days for history (using UTC dates)
+  const [previousDays, setPreviousDays] = useState([
+    { 
+      date: getPreviousDayName(1), 
+      id: `daily-${getPreviousUTCDateString(1)}`, 
+      completed: false, 
+      time: null as number | null 
+    },
+    { 
+      date: getPreviousDayName(2), 
+      id: `daily-${getPreviousUTCDateString(2)}`, 
+      completed: false, 
+      time: null as number | null 
+    },
+    { 
+      date: getPreviousDayName(3), 
+      id: `daily-${getPreviousUTCDateString(3)}`, 
+      completed: false, 
+      time: null as number | null 
+    },
+  ]);
+
+  // Memoize time values to prevent blinking
+  const timeInfo = useMemo(() => {
+    const remaining = getTimeRemaining('daily');
+    return {
+      remaining,
+      isExpired: remaining === 'Expired!' || remaining.includes('Expired'),
+      isActive: isDailyChallengeActive(),
+      isUrgent: remaining.includes('0h') || (remaining.includes('h') && !remaining.includes('d') && !remaining.includes('Expired'))
+    };
+  }, [forceUpdate]);
+
+  const { remaining: timeRemaining, isExpired, isUrgent } = timeInfo;
 
   useEffect(() => {
-    loadChallengeProgress();
-    const interval = setInterval(() => {
-      setChallengeData(prev => ({
-        ...prev,
-        timeRemaining: calculateTimeRemaining(),
-      }));
+    loadChallengeData();
+    
+    // Update timer every second using forceUpdate counter
+    timeUpdateRef.current = setInterval(() => {
+      setForceUpdate(prev => prev + 1);
     }, 1000);
     
-    return () => clearInterval(interval);
+    return () => {
+      if (timeUpdateRef.current) {
+        clearInterval(timeUpdateRef.current);
+      }
+    };
   }, []);
 
-  const loadChallengeProgress = async () => {
+  const loadChallengeData = async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const stored = await AsyncStorage.getItem(`dailyChallenge-${today}-${settings.gridSize}`);
+      setLoading(true);
       
-      if (stored) {
-        const progress = JSON.parse(stored);
-        setChallengeData(prev => ({
-          ...prev,
-          completed: progress.completed || false,
-          bestTime: progress.bestTime || null,
-          attempts: progress.attempts || 0,
-        }));
+      // Get real player count from Firebase
+      const count = await getChallengePlayerCount('daily');
+      setPlayerCount(count);
+      
+      // Check if current user has played
+      const user = auth.currentUser;
+      if (user) {
+        console.log(`👤 Checking challenge for user: ${user.uid}`);
+        console.log(`📅 Today's Challenge ID: ${challengeId}`);
+        console.log(`⏰ Challenge active: ${challengeActive}`);
+        
+        // Get today's result
+        const result = await getUserChallengeResult(user.uid, challengeId);
+        
+        // Check if challenge is expired
+        const isExpired = !challengeActive;
+        
+        if (result && result.completed) {
+          console.log('✅ User has completed today\'s challenge:', result);
+          setHasPlayed(true);
+          setChallengeResult(result);
+          setAttempts(result.attempts || 1);
+          
+          // Only get rank if challenge is still active
+          if (challengeActive) {
+            console.log('🎯 Getting rank for challenge:', challengeId);
+            console.log('🎯 User time:', result.bestTime || result.time);
+            
+            const rank = await getPlayerRank(challengeId, user.uid);
+            
+            console.log('🎯 Raw rank returned:', rank);
+            setUserRank(rank);
+            
+            console.log(`🏆 User rank: ${rank} out of ${count}`);
+          } else {
+            setUserRank(null);
+          }
+        } else {
+          console.log('❌ User has not completed today\'s challenge');
+          
+          // If challenge is expired, check if they played yesterday
+          if (isExpired) {
+            console.log('📅 Challenge expired - checking yesterday\'s result...');
+            
+            // Get yesterday's date
+            const yesterday = new Date();
+            yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+            const yesterdayId = `daily-${yesterday.getUTCFullYear()}-${String(yesterday.getUTCMonth() + 1).padStart(2, '0')}-${String(yesterday.getUTCDate()).padStart(2, '0')}`;
+            
+            console.log(`🔍 Checking yesterday: ${yesterdayId}`);
+            const yesterdayResult = await getUserChallengeResult(user.uid, yesterdayId);
+            
+            if (yesterdayResult && yesterdayResult.completed) {
+              console.log('✅ Found result from yesterday!');
+              setHasPlayed(true);
+              setChallengeResult(yesterdayResult);
+              setAttempts(yesterdayResult.attempts || 1);
+              // Don't set rank for expired challenge
+              setUserRank(null);
+            } else {
+              console.log('❌ No result from yesterday');
+              setHasPlayed(false);
+              setChallengeResult(null);
+              setUserRank(null);
+            }
+          } else {
+            setHasPlayed(false);
+            setChallengeResult(null);
+            setUserRank(null);
+          }
+        }
+        
+        // Load previous days results (always show last 3 days regardless of expiration)
+        console.log('📅 Loading previous days results...');
+        const updatedPreviousDays = [...previousDays];
+        for (let i = 0; i < updatedPreviousDays.length; i++) {
+          const day = updatedPreviousDays[i];
+          console.log(`🔍 Checking previous day: ${day.id}`);
+          const prevResult = await getUserChallengeResult(user.uid, day.id);
+          if (prevResult && prevResult.completed) {
+            updatedPreviousDays[i].completed = true;
+            updatedPreviousDays[i].time = prevResult.bestTime || prevResult.time;
+            console.log(`✅ Previous day ${day.id} completed with time: ${updatedPreviousDays[i].time}s`);
+          } else {
+            console.log(`❌ Previous day ${day.id} not completed`);
+          }
+        }
+        setPreviousDays(updatedPreviousDays);
       }
+      
     } catch (error) {
-      console.error('Error loading challenge progress:', error);
+      console.error('Error loading challenge data:', error);
     } finally {
       setLoading(false);
     }
   };
 
   const handleStartChallenge = () => {
+    console.log('🎮 Starting challenge with ID:', challengeId);
+    
+    // Capture the start time and challenge ID
+    const startTime = Date.now();
+    const startChallengeId = challengeId; // This is the current UTC date when starting
+    
     navigation.navigate('Play', {
-      gridSize: challengeData.gridSize,
+      gridSize: settings.gridSize || '8x8',
       difficulty: 'Expert',
-      challengeType: 'daily', // ensures PlayScreen knows it's a daily challenge
-      challengeId: challengeData.id,
-      key: `daily-${challengeData.id}-${Date.now()}`, // ensures fresh game every time
+      challengeType: 'daily',
+      challengeId: startChallengeId, // Use the ID from when they STARTED
+      startTime: startTime, // Pass start time
+      key: `daily-${startChallengeId}-${startTime}`,
     });
+  };
+
+  const handleViewResults = () => {
+    // If the challenge is expired but the user has a result from yesterday
+    if (isExpired && challengeResult) {
+      navigation.navigate('ChallengeResults', {
+        challengeId: challengeId, // This is yesterday's ID if expired
+        challengeType: 'daily',
+        time: challengeResult?.bestTime || challengeResult?.time,
+        isPerfect: challengeResult?.isPerfect,
+        moves: challengeResult?.moves,
+        correctMoves: challengeResult?.correctMoves,
+        wrongMoves: challengeResult?.wrongMoves,
+        accuracy: challengeResult?.accuracy,
+        completed: true,
+        completedAt: challengeResult?.completedAt, // Pass when they completed
+      });
+    } else {
+      navigation.navigate('ChallengeResults', {
+        challengeId,
+        challengeType: 'daily',
+        time: challengeResult?.bestTime || challengeResult?.time,
+        isPerfect: challengeResult?.isPerfect,
+        moves: challengeResult?.moves,
+        correctMoves: challengeResult?.correctMoves,
+        wrongMoves: challengeResult?.wrongMoves,
+        accuracy: challengeResult?.accuracy,
+        completed: true,
+      });
+    }
+  };
+
+  const handleButtonPress = () => {
+    console.log('👆 Button pressed - Active:', challengeActive, 'Has played:', hasPlayed);
+    
+    // If challenge is expired but user has played (they played yesterday)
+    if (isExpired && hasPlayed) {
+      console.log('➡️ Challenge expired but has result, viewing results');
+      handleViewResults();
+      return;
+    }
+    
+    // If challenge is expired, always start a new game (for today)
+    if (isExpired) {
+      console.log('➡️ Challenge expired, starting new game for today');
+      handleStartChallenge();
+      return;
+    }
+    
+    // If active and played, view results; otherwise play
+    if (hasPlayed) {
+      console.log('➡️ Challenge completed, viewing results');
+      handleViewResults();
+    } else {
+      console.log('➡️ Challenge active, starting new game');
+      handleStartChallenge();
+    }
+  };
+
+  const getButtonText = () => {
+    if (isExpired) {
+      return 'NEW DAILY CHALLENGE AVAILABLE';
+    }
+    return hasPlayed ? 'VIEW RESULTS' : 'PLAY DAILY CHALLENGE';
+  };
+
+  // Helper to get contrasting text color
+  const getContrastColor = (bgColor: string): string => {
+    const hex = bgColor.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? '#000000' : '#ffffff';
   };
 
   if (loading) {
@@ -129,118 +385,267 @@ const DailyChallengeScreen = () => {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.button }]}>
-          <Text style={[styles.title, { color: colors.text }]}>Daily Challenge</Text>
-          <Text style={[styles.subtitle, { color: colors.text }]}>
-            {new Date().toLocaleDateString('en-US', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            })}
+          <Text style={[styles.title, { color: getContrastColor(colors.button) }]}>
+            Daily Challenge
           </Text>
+          <Text style={[styles.subtitle, { color: getContrastColor(colors.button) }]}>
+            {formatDate(new Date())} (Local)
+          </Text>
+          <TouchableOpacity onPress={showTimezoneInfo}>
+            <Text style={[styles.utcNote, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+              🌍 UTC Date: {getUTCDateString()} (tap for info)
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Challenge Card */}
         <View style={[styles.challengeCard, { backgroundColor: colors.button }]}>
-          <View style={[styles.badge, { backgroundColor: '#4CAF50' }]}>
-            <Text style={styles.badgeText}>TODAY'S CHALLENGE</Text>
+          <View style={[styles.badge, { backgroundColor: isExpired ? '#666' : '#2E7D32' }]}>
+            <Text style={styles.badgeText}>
+              {isExpired ? 'EXPIRED' : 'TODAY\'S CHALLENGE'}
+            </Text>
           </View>
           
           <View style={styles.challengeHeader}>
-            <Text style={[styles.challengeTitle, { color: colors.text }]}>{challengeData.title}</Text>
-            <Text style={[styles.gridSizeBadge, { color: colors.text }]}>{challengeData.gridSize}</Text>
+            <Text style={[styles.challengeTitle, { color: getContrastColor(colors.button) }]}>
+              Daily Jungle Adventure
+            </Text>
+            <Text style={[styles.gridSizeBadge, { 
+              color: getContrastColor(colors.button),
+              backgroundColor: 'rgba(255,255,255,0.2)' 
+            }]}>
+              {settings.gridSize || '8x8'}
+            </Text>
           </View>
           
-          <Text style={[styles.challengeDesc, { color: colors.text }]}>{challengeData.description}</Text>
+          <Text style={[styles.challengeDesc, { color: getContrastColor(colors.button) }]}>
+            {isExpired 
+              ? "This challenge has expired. A new one is ready at UTC midnight!" 
+              : "All players worldwide see the SAME puzzle today!"}
+          </Text>
           
           {/* Challenge Details */}
           <View style={styles.detailsGrid}>
             <View style={styles.detailBox}>
-              <Text style={[styles.detailLabel, { color: colors.text }]}>Difficulty</Text>
+              <Text style={[styles.detailLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                Difficulty
+              </Text>
               <View style={[styles.difficultyBadge, { backgroundColor: '#9C27B0' }]}>
                 <Text style={styles.difficultyText}>EXPERT</Text>
               </View>
             </View>
             
             <View style={styles.detailBox}>
-              <Text style={[styles.detailLabel, { color: colors.text }]}>Reward</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                🏆 {challengeData.reward} pts
+              <Text style={[styles.detailLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                Your Best
+              </Text>
+              <Text style={[styles.detailValue, { color: getContrastColor(colors.button) }]}>
+                ⏱️ {challengeResult?.bestTime && !isExpired ? formatTime(challengeResult.bestTime) : '--:--'}
               </Text>
             </View>
             
             <View style={styles.detailBox}>
-              <Text style={[styles.detailLabel, { color: colors.text }]}>Time Left</Text>
-              <Text style={[styles.timer, { color: '#FF5722' }]}>
-                ⏰ {challengeData.timeRemaining}
+              <Text style={[styles.detailLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                Time Left
+              </Text>
+              <Text style={[styles.timer, { color: isUrgent ? '#FF5722' : '#4CAF50' }]}>
+                ⏰ {timeRemaining}
               </Text>
             </View>
             
             <View style={styles.detailBox}>
-              <Text style={[styles.detailLabel, { color: colors.text }]}>Players</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                👥 {challengeData.participants.toLocaleString()}
+              <Text style={[styles.detailLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                Players
+              </Text>
+              <Text style={[styles.detailValue, { color: getContrastColor(colors.button) }]}>
+                👥 {playerCount.toLocaleString()}
               </Text>
             </View>
           </View>
 
-          {/* Your Progress */}
-          {challengeData.completed ? (
+          {/* Your Progress - Only show if challenge is active and played */}
+          {hasPlayed && !isExpired ? (
             <View style={[styles.completedContainer, { backgroundColor: '#4CAF5020' }]}>
               <Text style={[styles.completedText, { color: '#4CAF50' }]}>
                 ✅ Daily Challenge Completed!
               </Text>
-              {challengeData.bestTime && (
-                <Text style={[styles.bestTime, { color: colors.text }]}>
-                  Your Time: {formatTime(challengeData.bestTime)}
+              {challengeResult?.bestTime && (
+                <Text style={[styles.bestTime, { color: getContrastColor(colors.button) }]}>
+                  Your Time: {formatTime(challengeResult.bestTime)}
                 </Text>
               )}
-              <Text style={[styles.rewardEarned, { color: colors.text }]}>
-                +{challengeData.reward} points earned
+              {challengeResult?.isPerfect && (
+                <Text style={[styles.perfectBadge, { color: '#FFD700' }]}>
+                  ✨ Perfect Game!
+                </Text>
+              )}
+              <Text style={[styles.streakBonus, { color: getContrastColor(colors.button) }]}>
+                🔥 Current Streak: {profile?.stats?.currentStreak || 0} days
               </Text>
             </View>
           ) : (
             <View style={styles.progressContainer}>
-              <Text style={[styles.progressText, { color: colors.text }]}>
-                {challengeData.attempts > 0 
-                  ? `Attempts today: ${challengeData.attempts}` 
-                  : 'Ready to start today\'s challenge!'}
+              <Text style={[styles.progressText, { color: getContrastColor(colors.button) }]}>
+                {isExpired 
+                  ? "Today's challenge has expired. A new one is ready at UTC midnight!" 
+                  : attempts > 0 
+                    ? `Attempts today: ${attempts}` 
+                    : 'Ready to start today\'s challenge!'}
               </Text>
             </View>
           )}
 
-          {/* Start Button */}
+          {/* Start/View Results Button */}
           <TouchableOpacity 
             style={[
               styles.startButton, 
               { 
-                backgroundColor: challengeData.completed ? '#666' : '#4CAF50',
-                opacity: challengeData.completed ? 0.7 : 1,
+                backgroundColor: isExpired ? '#2E7D32' : (hasPlayed ? '#666' : '#2E7D32'),
               }
             ]}
-            onPress={handleStartChallenge}
-            disabled={challengeData.completed}
+            onPress={handleButtonPress}
+            disabled={false} 
           >
             <Text style={styles.startButtonText}>
-              {challengeData.completed ? 'COMPLETED TODAY' : 'START DAILY CHALLENGE'}
+              {getButtonText()}
             </Text>
           </TouchableOpacity>
         </View>
 
+        {/* Your Performance Section - Only show if played and challenge is active */}
+        {hasPlayed && !isExpired && (
+          <View style={[styles.performanceContainer, { backgroundColor: colors.button }]}>
+            <Text style={[styles.performanceTitle, { color: getContrastColor(colors.button) }]}>
+              📊 Your Performance
+            </Text>
+            
+            <View style={styles.performanceRow}>
+              <View style={styles.performanceItem}>
+                <Text style={[styles.performanceLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                  Username
+                </Text>
+                <Text style={[styles.performanceValue, { color: getContrastColor(colors.button) }]}>
+                  {profile?.username || profile?.name || 'Explorer'}
+                </Text>
+              </View>
+              
+              <View style={styles.performanceItem}>
+                <Text style={[styles.performanceLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                  Best Time
+                </Text>
+                <Text style={[styles.performanceValue, { color: getContrastColor(colors.button) }]}>
+                  {challengeResult?.bestTime ? formatTime(challengeResult.bestTime) : '--:--'}
+                </Text>
+              </View>
+            </View>
+            
+            <View style={styles.performanceRow}>
+              <View style={styles.performanceItem}>
+                <Text style={[styles.performanceLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                  Accuracy
+                </Text>
+                <Text style={[styles.performanceValue, { color: getContrastColor(colors.button) }]}>
+                  {challengeResult?.accuracy ? challengeResult.accuracy.toFixed(1) : '0'}%
+                </Text>
+              </View>
+              
+              <View style={styles.performanceItem}>
+                <Text style={[styles.performanceLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                  Position
+                </Text>
+                <View style={styles.rankContainer}>
+                  <Text style={[styles.performanceValue, { 
+                    color: userRank === 1 ? '#FFD700' : 
+                           userRank === 2 ? '#C0C0C0' : 
+                           userRank === 3 ? '#CD7F32' : 
+                           getContrastColor(colors.button),
+                    fontWeight: userRank && userRank <= 3 ? 'bold' : 'normal',
+                    marginRight: 4
+                  }]}>
+                    {getRankDisplay(userRank)}
+                  </Text>
+                  <Text style={[styles.performanceLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                    of {playerCount}
+                  </Text>
+                </View>
+              </View>
+            </View>
+            
+            {challengeResult?.moves && (
+              <View style={styles.performanceRow}>
+                <View style={styles.performanceItem}>
+                  <Text style={[styles.performanceLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                    Total Moves
+                  </Text>
+                  <Text style={[styles.performanceValue, { color: getContrastColor(colors.button) }]}>
+                    {challengeResult.moves}
+                  </Text>
+                </View>
+                
+                <View style={styles.performanceItem}>
+                  <Text style={[styles.performanceLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
+                    Perfect
+                  </Text>
+                  <Text style={[styles.performanceValue, { color: challengeResult?.isPerfect ? '#4CAF50' : getContrastColor(colors.button) }]}>
+                    {challengeResult?.isPerfect ? '✨ Yes' : 'No'}
+                  </Text>
+                </View>
+              </View>
+            )}
+            
+            {/* Show percentile for non-top positions */}
+            {userRank && userRank > 3 && playerCount > 0 && (
+              <View style={styles.percentileContainer}>
+                <Text style={[styles.percentileText, { color: getContrastColor(colors.button), opacity: 0.8 }]}>
+                  Top {Math.round((userRank / playerCount) * 100)}% of players
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ===== LEADERBOARD SECTION ===== */}
+        {/* Only show leaderboard if challenge is active and user has played */}
+        {hasPlayed && !isExpired && (
+          <View style={[styles.leaderboardContainer, { backgroundColor: colors.button }]}>
+            {/* Leaderboard Toggle Header */}
+            <TouchableOpacity 
+              style={styles.leaderboardHeader}
+              onPress={() => setShowLeaderboard(!showLeaderboard)}
+            >
+              <Text style={[styles.leaderboardTitle, { color: getContrastColor(colors.button) }]}>
+                🏆 Challenge Leaderboard
+              </Text>
+              <Text style={[styles.leaderboardToggle, { color: getContrastColor(colors.button) }]}>
+                {showLeaderboard ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Leaderboard Content (conditionally shown) */}
+            {showLeaderboard && (
+              <View style={styles.leaderboardContent}>
+                <ChallengeLeaderboard challengeId={challengeId} />
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Previous Days */}
         <View style={[styles.previousContainer, { backgroundColor: colors.button }]}>
-          <Text style={[styles.previousTitle, { color: colors.text }]}>
+          <Text style={[styles.previousTitle, { color: getContrastColor(colors.button) }]}>
             📅 Previous Daily Challenges
           </Text>
-          {challengeData.previousPuzzles.map((puzzle, index) => (
+          {previousDays.map((puzzle, index) => (
             <View key={index} style={styles.previousPuzzle}>
-              <Text style={[styles.previousDate, { color: colors.text }]}>{puzzle.date}</Text>
+              <Text style={[styles.previousDate, { color: getContrastColor(colors.button) }]}>
+                {puzzle.date}
+              </Text>
               <View style={styles.previousStatus}>
-                <Text style={[styles.previousCompleted, { color: '#4CAF50' }]}>
-                  {puzzle.completed ? '✓ Completed' : '–'}
+                <Text style={[styles.previousCompleted, { color: puzzle.completed ? '#4CAF50' : '#999' }]}>
+                  {puzzle.completed ? '✓ Completed' : '— Not played'}
                 </Text>
                 {puzzle.time && (
-                  <Text style={[styles.previousTime, { color: colors.text }]}>
+                  <Text style={[styles.previousTime, { color: getContrastColor(colors.button), opacity: 0.8 }]}>
                     {formatTime(puzzle.time)}
                   </Text>
                 )}
@@ -251,26 +656,27 @@ const DailyChallengeScreen = () => {
 
         {/* Daily Streak */}
         <View style={[styles.streakContainer, { backgroundColor: colors.button }]}>
-          <Text style={[styles.streakTitle, { color: colors.text }]}>
+          <Text style={[styles.streakTitle, { color: getContrastColor(colors.button) }]}>
             🔥 Daily Streak: {profile?.stats?.currentStreak || 0} days
           </Text>
-          <Text style={[styles.streakText, { color: colors.text }]}>
-            Complete today's challenge to continue your streak!
+          <Text style={[styles.streakText, { color: getContrastColor(colors.button), opacity: 0.9 }]}>
+            {hasPlayed && !isExpired
+              ? "Great job completing today's challenge! Come back tomorrow at UTC midnight for another one."
+              : "Complete today's challenge to continue your streak!"}
           </Text>
+          {profile?.stats?.longestStreak ? (
+            <Text style={[styles.longestStreak, { color: getContrastColor(colors.button), opacity: 0.8 }]}>
+              Longest streak: {profile.stats.longestStreak} days
+            </Text>
+          ) : null}
         </View>
 
-        <AppFooter />
+        {/* Footer */}
+        <AppFooter textColor={colors.text} version="1.0.0" />
       </ScrollView>
     </SafeAreaView>
   );
 };
-
-const formatTime = (seconds: number): string => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
 
 const styles = StyleSheet.create({
   loadingContainer: {
@@ -299,6 +705,11 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     opacity: 0.9,
+  },
+  utcNote: {
+    fontSize: 12,
+    marginTop: 5,
+    textDecorationLine: 'underline',
   },
   challengeCard: {
     margin: 20,
@@ -336,7 +747,6 @@ const styles = StyleSheet.create({
   gridSizeBadge: {
     fontSize: 14,
     fontWeight: '600',
-    backgroundColor: 'rgba(255,255,255,0.2)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
@@ -359,7 +769,6 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 12,
-    opacity: 0.7,
     marginBottom: 5,
   },
   difficultyBadge: {
@@ -397,9 +806,15 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginBottom: 5,
   },
-  rewardEarned: {
+  perfectBadge: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  streakBonus: {
     fontSize: 14,
-    opacity: 0.9,
+    fontWeight: '600',
+    marginTop: 5,
   },
   progressContainer: {
     padding: 15,
@@ -419,6 +834,75 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  performanceContainer: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 20,
+    borderRadius: 15,
+  },
+  performanceTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+  },
+  performanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  performanceItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  performanceLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  performanceValue: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  rankContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  percentileContainer: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+  },
+  percentileText: {
+    fontSize: 14,
+    fontStyle: 'italic',
+  },
+  leaderboardContainer: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 15,
+    overflow: 'hidden',
+  },
+  leaderboardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  leaderboardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  leaderboardToggle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  leaderboardContent: {
+    padding: 10,
+    minHeight: 200,
   },
   previousContainer: {
     marginHorizontal: 20,
@@ -451,7 +935,6 @@ const styles = StyleSheet.create({
   },
   previousTime: {
     fontSize: 12,
-    opacity: 0.8,
     marginTop: 2,
   },
   streakContainer: {
@@ -469,7 +952,11 @@ const styles = StyleSheet.create({
   streakText: {
     fontSize: 14,
     textAlign: 'center',
-    opacity: 0.9,
+    marginBottom: 8,
+  },
+  longestStreak: {
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
 

@@ -15,7 +15,8 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { SettingsStackParamList } from '../navigation/SettingsStack';
 import { ThemeContext, themeStyles } from '../context/ThemeContext';
-import { useProfile, ProfileData } from '../context/ProfileContext'; // Add this
+import { useProfile, ProfileData } from '../context/ProfileContext';
+import { useAuth } from '../context/AuthContext'; // Add this
 
 type EditProfileScreenNavigationProp = StackNavigationProp<SettingsStackParamList, 'EditProfile'>;
 type EditProfileScreenRouteProp = RouteProp<SettingsStackParamList, 'EditProfile'>;
@@ -39,23 +40,27 @@ const EditProfileScreen = () => {
   const navigation = useNavigation<EditProfileScreenNavigationProp>();
   const route = useRoute<EditProfileScreenRouteProp>();
   const { theme } = useContext(ThemeContext);
-  const { profile, updateProfile } = useProfile(); // Get profile and update function
+  const { profile, updateProfile } = useProfile();
+  const { updateUserProfile } = useAuth(); // Add this for Firebase Auth updates
   const colors = themeStyles[theme];
   
   const { userData } = route.params || {};
   
   // Initialize form with current profile data
-  const [name, setName] = useState(profile.name);
-  const [username, setUsername] = useState(profile.username);
-  const [email, setEmail] = useState(profile.email);
-  const [bio, setBio] = useState(profile.bio);
-  const [selectedIcon, setSelectedIcon] = useState(profile.avatar);
+  const [name, setName] = useState(profile?.name || '');
+  const [username, setUsername] = useState(profile?.username || '');
+  const [email, setEmail] = useState(profile?.email || '');
+  const [bio, setBio] = useState(profile?.bio || '');
+  const [selectedIcon, setSelectedIcon] = useState(profile?.avatar || '😎');
   const [showIconPicker, setShowIconPicker] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleIconSelect = (icon: string) => {
     setSelectedIcon(icon);
     setShowIconPicker(false);
   };
+
+  // In EditProfileScreen.tsx, update the handleSave function:
 
   const handleSave = async () => {
     if (!name.trim() || !email.trim()) {
@@ -63,29 +68,57 @@ const EditProfileScreen = () => {
       return;
     }
     
-    // Update profile in context (and AsyncStorage)
-    await updateProfile({
-      name: name.trim(),
-      username: username.trim(),
-      email: email.trim(),
-      bio: bio.trim(),
-      avatar: selectedIcon,
-    });
-    
-    Alert.alert('Success', 'Profile updated successfully!', [
-      { text: 'OK', onPress: () => navigation.goBack() }
-    ]);
+    setLoading(true);
+    try {
+      // Update profile in context (and AsyncStorage)
+      await updateProfile({
+        name: name.trim(),
+        username: username.trim(),
+        email: email.trim(),
+        bio: bio.trim(),
+        avatar: selectedIcon,
+      });
+
+      // Also update Firebase Auth display name if changed
+      if (name.trim() !== profile?.name && updateUserProfile) {
+        console.log('📝 Updating Firebase Auth display name to:', name.trim());
+        await updateUserProfile({
+          displayName: name.trim(),
+        });
+      } else if (name.trim() !== profile?.name && !updateUserProfile) {
+        console.warn('⚠️ updateUserProfile is not available');
+      }
+      
+      Alert.alert('Success', 'Profile updated successfully!', [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update profile. Please try again.');
+      console.error('Profile update error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel = () => {
-    Alert.alert(
-      'Discard Changes?',
-      'Are you sure you want to discard your changes?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() }
-      ]
-    );
+    if (
+      name !== profile?.name ||
+      username !== profile?.username ||
+      email !== profile?.email ||
+      bio !== profile?.bio ||
+      selectedIcon !== profile?.avatar
+    ) {
+      Alert.alert(
+        'Discard Changes?',
+        'Are you sure you want to discard your changes?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() }
+        ]
+      );
+    } else {
+      navigation.goBack();
+    }
   };
 
   return (
@@ -118,9 +151,9 @@ const EditProfileScreen = () => {
             <Text style={[styles.label, { color: colors.text }]}>Full Name *</Text>
             <TextInput
               style={[styles.input, { 
-                backgroundColor: colors.button,
+                backgroundColor: colors.card,
                 color: colors.text,
-                borderColor: colors.text,
+                borderColor: colors.border,
               }]}
               value={name}
               onChangeText={setName}
@@ -133,9 +166,9 @@ const EditProfileScreen = () => {
             <Text style={[styles.label, { color: colors.text }]}>Username</Text>
             <TextInput
               style={[styles.input, { 
-                backgroundColor: colors.button,
+                backgroundColor: colors.card,
                 color: colors.text,
-                borderColor: colors.text,
+                borderColor: colors.border,
               }]}
               value={username}
               onChangeText={setUsername}
@@ -148,9 +181,9 @@ const EditProfileScreen = () => {
             <Text style={[styles.label, { color: colors.text }]}>Email *</Text>
             <TextInput
               style={[styles.input, { 
-                backgroundColor: colors.button,
+                backgroundColor: colors.card,
                 color: colors.text,
-                borderColor: colors.text,
+                borderColor: colors.border,
               }]}
               value={email}
               onChangeText={setEmail}
@@ -165,9 +198,9 @@ const EditProfileScreen = () => {
             <Text style={[styles.label, { color: colors.text }]}>Bio</Text>
             <TextInput
               style={[styles.input, styles.textArea, { 
-                backgroundColor: colors.button,
+                backgroundColor: colors.card,
                 color: colors.text,
-                borderColor: colors.text,
+                borderColor: colors.border,
               }]}
               value={bio}
               onChangeText={setBio}
@@ -181,8 +214,9 @@ const EditProfileScreen = () => {
           {/* Action Buttons */}
           <View style={styles.buttonRow}>
             <TouchableOpacity 
-              style={[styles.button, styles.cancelButton, { borderColor: colors.button }]}
+              style={[styles.button, styles.cancelButton, { borderColor: colors.border }]}
               onPress={handleCancel}
+              disabled={loading}
             >
               <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
             </TouchableOpacity>
@@ -190,8 +224,11 @@ const EditProfileScreen = () => {
             <TouchableOpacity 
               style={[styles.button, styles.saveButton, { backgroundColor: colors.button }]}
               onPress={handleSave}
+              disabled={loading}
             >
-              <Text style={[styles.saveButtonText, { color: colors.text }]}>Save Changes</Text>
+              <Text style={[styles.saveButtonText, { color: '#fff' }]}>
+                {loading ? 'Saving...' : 'Save Changes'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -219,8 +256,11 @@ const EditProfileScreen = () => {
                   key={item.id}
                   style={[
                     styles.iconOption,
-                    { backgroundColor: colors.button },
-                    selectedIcon === item.icon && styles.selectedIconOption
+                    { backgroundColor: colors.card },
+                    selectedIcon === item.icon && { 
+                      borderWidth: 3,
+                      borderColor: colors.button,
+                    }
                   ]}
                   onPress={() => handleIconSelect(item.icon)}
                 >
@@ -369,10 +409,6 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 12,
     marginBottom: 15,
-  },
-  selectedIconOption: {
-    borderWidth: 3,
-    borderColor: '#fff',
   },
   iconText: {
     fontSize: 40,

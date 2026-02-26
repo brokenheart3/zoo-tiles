@@ -15,7 +15,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.yourname.zootiles",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -34,6 +38,11 @@
       "eas": {
         "projectId": "36f6c24d-d1e0-4c82-b494-baedb1991208"
       }
-    }
+    },
+    "plugins": [
+      "@react-native-google-signin/google-signin",
+      "expo-apple-authentication",
+      "expo-web-browser"
+    ]
   }
 }

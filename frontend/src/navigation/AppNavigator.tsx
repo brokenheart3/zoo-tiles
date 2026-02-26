@@ -1,12 +1,15 @@
-// navigation/AppNavigator.tsx
+// src/navigation/AppNavigator.tsx
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
-import RootNavigator from './RootNavigator';
+import RootNavigator from './RootNavigator'; // This is a default export
+import ScreenContainer from '../components/common/ScreenContainer';
 
 const AppNavigator = () => {
   return (
     <NavigationContainer>
-      <RootNavigator />
+      <ScreenContainer>
+        <RootNavigator />
+      </ScreenContainer>
     </NavigationContainer>
   );
 };

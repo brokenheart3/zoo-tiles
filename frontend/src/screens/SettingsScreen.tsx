@@ -31,7 +31,7 @@ const SettingsScreen = () => {
           ]}
           onPress={() => {
             setSelected(item.label);
-            navigation.navigate(item.screen as never); // type-safe
+            navigation.navigate(item.screen as never); 
           }}
         >
           <Ionicons name={item.icon} size={24} color={selected === item.label ? "blue" : "#333"} />

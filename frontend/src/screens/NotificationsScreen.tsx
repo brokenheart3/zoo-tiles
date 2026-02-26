@@ -1,3 +1,4 @@
+// src/screens/NotificationsScreen.tsx
 import React, { useState, useEffect, useContext } from "react";
 import {
   View,
@@ -6,24 +7,32 @@ import {
   Switch,
   ScrollView,
   SafeAreaView,
+  TouchableOpacity,
+  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ThemeContext, themeStyles, ThemeType } from "../context/ThemeContext";
+import { ThemeContext, themeStyles } from "../context/ThemeContext";
+import { Platform } from 'react-native';
 
 const NotificationsScreen = () => {
   const { theme } = useContext(ThemeContext);
   const colors = themeStyles[theme];
   
-  const [dailyReminder, setDailyReminder] = useState(true);
-  const [weeklyChallenge, setWeeklyChallenge] = useState(true);
-  const [promoAlerts, setPromoAlerts] = useState(true);
-  const [soundEffects, setSoundEffects] = useState(true);
-  const [vibration, setVibration] = useState(true);
-  const [badgeCount, setBadgeCount] = useState(true);
+  // Simple state
+  const [daily, setDaily] = useState(true);
+  const [weekly, setWeekly] = useState(true);
+  const [promo, setPromo] = useState(true);
+  const [sound, setSound] = useState(true);
+  const [vibe, setVibe] = useState(true);
+  const [badge, setBadge] = useState(true);
 
-  // Load saved preferences
+  // Load on mount
   useEffect(() => {
-    (async () => {
+    loadPreferences();
+  }, []);
+
+  const loadPreferences = async () => {
+    try {
       const daily = await AsyncStorage.getItem("dailyReminder");
       const weekly = await AsyncStorage.getItem("weeklyChallenge");
       const promo = await AsyncStorage.getItem("promoAlerts");
@@ -31,23 +40,57 @@ const NotificationsScreen = () => {
       const vib = await AsyncStorage.getItem("vibration");
       const badge = await AsyncStorage.getItem("badgeCount");
 
-      if (daily !== null) setDailyReminder(daily === "true");
-      if (weekly !== null) setWeeklyChallenge(weekly === "true");
-      if (promo !== null) setPromoAlerts(promo === "true");
-      if (sound !== null) setSoundEffects(sound === "true");
-      if (vib !== null) setVibration(vib === "true");
-      if (badge !== null) setBadgeCount(badge === "true");
-    })();
-  }, []);
+      if (daily !== null) setDaily(daily === "true");
+      if (weekly !== null) setWeekly(weekly === "true");
+      if (promo !== null) setPromo(promo === "true");
+      if (sound !== null) setSound(sound === "true");
+      if (vib !== null) setVibe(vib === "true");
+      if (badge !== null) setBadge(badge === "true");
+    } catch (error) {
+      console.error('Error loading:', error);
+    }
+  };
 
   const toggleSwitch = async (key: string, value: boolean, setter: Function) => {
-    setter(value);
-    await AsyncStorage.setItem(key, value.toString());
+    try {
+      console.log(`Toggling ${key} to ${value}`);
+      
+      // Update UI immediately
+      setter(value);
+      
+      // Save to storage
+      await AsyncStorage.setItem(key, value.toString());
+      
+      // Verify it was saved
+      const saved = await AsyncStorage.getItem(key);
+      console.log(`Saved ${key}=${saved}`);
+      
+    } catch (error) {
+      console.error('Error toggling:', error);
+      // Revert on error
+      setter(!value);
+    }
   };
 
-  const getSwitchColor = (isEnabled: boolean) => {
-    return isEnabled ? colors.button : colors.text === "#000000" ? "#ccc" : "#666";
-  };
+  const turnAllOff = async () => {
+      await toggleSwitch('dailyReminder', false, setDaily);
+      await toggleSwitch('weeklyChallenge', false, setWeekly);
+      await toggleSwitch('promoAlerts', false, setPromo);
+      await toggleSwitch('soundEffects', false, setSound);
+      await toggleSwitch('vibration', false, setVibe);
+      await toggleSwitch('badgeCount', false, setBadge);
+      Alert.alert('✅ All notifications disabled');
+    };
+  
+    const resetAll = async () => {
+      await toggleSwitch('dailyReminder', true, setDaily);
+      await toggleSwitch('weeklyChallenge', true, setWeekly);
+      await toggleSwitch('promoAlerts', true, setPromo);
+      await toggleSwitch('soundEffects', true, setSound);
+      await toggleSwitch('vibration', true, setVibe);
+      await toggleSwitch('badgeCount', true, setBadge);
+      Alert.alert('✅ All notifications enabled');
+    };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -59,50 +102,50 @@ const NotificationsScreen = () => {
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Game Notifications</Text>
           
           {/* Daily Reminder */}
-          <View style={[styles.option, { borderBottomColor: colors.text }]}>
+          <View style={[styles.option, { borderBottomColor: colors.text + '30' }]}>
             <View style={styles.optionInfo}>
               <Text style={[styles.label, { color: colors.text }]}>Daily Game Reminder</Text>
               <Text style={[styles.description, { color: colors.text }]}>
-                Remind you to play daily
+                Remind you to play daily at 9 AM
               </Text>
             </View>
             <Switch
-              value={dailyReminder}
-              onValueChange={(val) => toggleSwitch("dailyReminder", val, setDailyReminder)}
+              value={daily}
+              onValueChange={(val) => toggleSwitch("dailyReminder", val, setDaily)}
               trackColor={{ true: colors.button, false: `${colors.button}40` }}
-              thumbColor={dailyReminder ? "#fff" : "#f4f3f4"}
+              thumbColor={daily ? "#fff" : "#f4f3f4"}
             />
           </View>
 
           {/* Weekly Challenge */}
-          <View style={[styles.option, { borderBottomColor: colors.text }]}>
+          <View style={[styles.option, { borderBottomColor: colors.text + '30' }]}>
             <View style={styles.optionInfo}>
               <Text style={[styles.label, { color: colors.text }]}>Weekly Challenge Alerts</Text>
               <Text style={[styles.description, { color: colors.text }]}>
-                Notify about weekly challenges
+                Notify about new weekly challenges on Sundays
               </Text>
             </View>
             <Switch
-              value={weeklyChallenge}
-              onValueChange={(val) => toggleSwitch("weeklyChallenge", val, setWeeklyChallenge)}
+              value={weekly}
+              onValueChange={(val) => toggleSwitch("weeklyChallenge", val, setWeekly)}
               trackColor={{ true: colors.button, false: `${colors.button}40` }}
-              thumbColor={weeklyChallenge ? "#fff" : "#f4f3f4"}
+              thumbColor={weekly ? "#fff" : "#f4f3f4"}
             />
           </View>
 
           {/* Promotions */}
-          <View style={[styles.option, { borderBottomColor: colors.text }]}>
+          <View style={[styles.option, { borderBottomColor: colors.text + '30' }]}>
             <View style={styles.optionInfo}>
               <Text style={[styles.label, { color: colors.text }]}>Promotional Notifications</Text>
               <Text style={[styles.description, { color: colors.text }]}>
-                News, updates, and offers
+                News, updates, and special offers
               </Text>
             </View>
             <Switch
-              value={promoAlerts}
-              onValueChange={(val) => toggleSwitch("promoAlerts", val, setPromoAlerts)}
+              value={promo}
+              onValueChange={(val) => toggleSwitch("promoAlerts", val, setPromo)}
               trackColor={{ true: colors.button, false: `${colors.button}40` }}
-              thumbColor={promoAlerts ? "#fff" : "#f4f3f4"}
+              thumbColor={promo ? "#fff" : "#f4f3f4"}
             />
           </View>
         </View>
@@ -112,7 +155,7 @@ const NotificationsScreen = () => {
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Notification Preferences</Text>
           
           {/* Sound Effects */}
-          <View style={[styles.option, { borderBottomColor: colors.text }]}>
+          <View style={[styles.option, { borderBottomColor: colors.text + '30' }]}>
             <View style={styles.optionInfo}>
               <Text style={[styles.label, { color: colors.text }]}>Sound Effects</Text>
               <Text style={[styles.description, { color: colors.text }]}>
@@ -120,15 +163,15 @@ const NotificationsScreen = () => {
               </Text>
             </View>
             <Switch
-              value={soundEffects}
-              onValueChange={(val) => toggleSwitch("soundEffects", val, setSoundEffects)}
+              value={sound}
+              onValueChange={(val) => toggleSwitch("soundEffects", val, setSound)}
               trackColor={{ true: colors.button, false: `${colors.button}40` }}
-              thumbColor={soundEffects ? "#fff" : "#f4f3f4"}
+              thumbColor={sound ? "#fff" : "#f4f3f4"}
             />
           </View>
 
           {/* Vibration */}
-          <View style={[styles.option, { borderBottomColor: colors.text }]}>
+          <View style={[styles.option, { borderBottomColor: colors.text + '30' }]}>
             <View style={styles.optionInfo}>
               <Text style={[styles.label, { color: colors.text }]}>Vibration</Text>
               <Text style={[styles.description, { color: colors.text }]}>
@@ -136,15 +179,15 @@ const NotificationsScreen = () => {
               </Text>
             </View>
             <Switch
-              value={vibration}
-              onValueChange={(val) => toggleSwitch("vibration", val, setVibration)}
+              value={vibe}
+              onValueChange={(val) => toggleSwitch("vibration", val, setVibe)}
               trackColor={{ true: colors.button, false: `${colors.button}40` }}
-              thumbColor={vibration ? "#fff" : "#f4f3f4"}
+              thumbColor={vibe ? "#fff" : "#f4f3f4"}
             />
           </View>
 
           {/* Badge Count */}
-          <View style={[styles.option, { borderBottomColor: colors.text }]}>
+          <View style={[styles.option, { borderBottomColor: colors.text + '30' }]}>
             <View style={styles.optionInfo}>
               <Text style={[styles.label, { color: colors.text }]}>App Icon Badge</Text>
               <Text style={[styles.description, { color: colors.text }]}>
@@ -152,40 +195,77 @@ const NotificationsScreen = () => {
               </Text>
             </View>
             <Switch
-              value={badgeCount}
-              onValueChange={(val) => toggleSwitch("badgeCount", val, setBadgeCount)}
+              value={badge}
+              onValueChange={(val) => toggleSwitch("badgeCount", val, setBadge)}
               trackColor={{ true: colors.button, false: `${colors.button}40` }}
-              thumbColor={badgeCount ? "#fff" : "#f4f3f4"}
+              thumbColor={badge ? "#fff" : "#f4f3f4"}
             />
           </View>
         </View>
 
-        {/* Notification Summary */}
+        {/* Action Buttons */}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity 
+            style={[styles.button, { backgroundColor: '#f44336' }]}
+            onPress={turnAllOff}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.buttonText}>Turn All Off</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.button, { backgroundColor: '#4CAF50' }]}
+            onPress={resetAll}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.buttonText}>Reset to Default</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Summary Card */}
         <View style={[styles.summaryCard, { backgroundColor: `${colors.button}20` }]}>
           <Text style={[styles.summaryTitle, { color: colors.text }]}>Current Settings</Text>
+          
           <View style={styles.summaryRow}>
-            <Text style={[styles.summaryLabel, { color: colors.text }]}>Enabled Notifications:</Text>
-            <Text style={[styles.summaryValue, { color: colors.text }]}>
-              {[dailyReminder, weeklyChallenge, promoAlerts].filter(Boolean).length}/3
+            <Text style={[styles.summaryLabel, { color: colors.text }]}>Daily Reminder:</Text>
+            <Text style={[styles.summaryValue, { color: daily ? '#4CAF50' : '#f44336' }]}>
+              {daily ? "9:00 AM" : "Off"}
             </Text>
           </View>
+          
+          <View style={styles.summaryRow}>
+            <Text style={[styles.summaryLabel, { color: colors.text }]}>Weekly Challenge:</Text>
+            <Text style={[styles.summaryValue, { color: weekly ? '#4CAF50' : '#f44336' }]}>
+              {weekly ? "Sunday 10:00 AM" : "Off"}
+            </Text>
+          </View>
+          
           <View style={styles.summaryRow}>
             <Text style={[styles.summaryLabel, { color: colors.text }]}>Sound:</Text>
-            <Text style={[styles.summaryValue, { color: colors.text }]}>
-              {soundEffects ? "On" : "Off"}
+            <Text style={[styles.summaryValue, { color: sound ? '#4CAF50' : '#f44336' }]}>
+              {sound ? "On" : "Off"}
             </Text>
           </View>
+          
           <View style={styles.summaryRow}>
             <Text style={[styles.summaryLabel, { color: colors.text }]}>Vibration:</Text>
-            <Text style={[styles.summaryValue, { color: colors.text }]}>
-              {vibration ? "On" : "Off"}
+            <Text style={[styles.summaryValue, { color: vibe ? '#4CAF50' : '#f44336' }]}>
+              {vibe ? "On" : "Off"}
+            </Text>
+          </View>
+          
+          <View style={styles.summaryRow}>
+            <Text style={[styles.summaryLabel, { color: colors.text }]}>Badge Count:</Text>
+            <Text style={[styles.summaryValue, { color: badge ? '#4CAF50' : '#f44336' }]}>
+              {badge ? "On" : "Off"}
             </Text>
           </View>
         </View>
 
         <Text style={[styles.note, { color: colors.text }]}>
-          Note: You can customize which notifications you want to receive. Daily and weekly
-          alerts will help you stay engaged with the game. Changes take effect immediately.
+          Note: Notification times are based on your device's local time. 
+          Make sure to enable notifications in your device settings for the best experience.
+          {Platform.OS === 'ios' && ' Vibration may not be available on all iOS devices.'}
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -233,6 +313,28 @@ const styles = StyleSheet.create({
   description: {
     fontSize: 14,
     opacity: 0.8,
+  },
+  buttonContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 30,
+    marginTop: 10,
+  },
+  button: {
+    flex: 0.48,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  buttonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
   },
   summaryCard: {
     padding: 20,
