@@ -43,6 +43,7 @@
       "@react-native-google-signin/google-signin",
       "expo-apple-authentication",
       "expo-web-browser"
-    ]
+    ],
+    "owner": "ckayssar1"
   }
 }
