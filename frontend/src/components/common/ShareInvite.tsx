@@ -33,7 +33,7 @@ const ShareInvite: React.FC<ShareInviteProps> = ({
 
 Download now and use invite code: ${userId}
 
-https://expo.dev/@ckayssar1/sudoku-tiles;
+https://expo.dev/@ckayssar1/zoo-tiles`;
 
   const handleShare = async () => {
     try {
