@@ -44,12 +44,12 @@ const EnhancedAppFooter: React.FC<EnhancedAppFooterProps> = ({
       
       {showLogo && (
         <Text style={[styles.logo, { color: textColor }, textStyle]}>
-          Sudoku-Tiles
+          Sudoku Tiles Pro
         </Text>
       )}
       
       <Text style={[styles.footerText, { color: textColor }, textStyle]}>
-        Animal Puzzle Adventure
+        Treasure Puzzle Adventure
       </Text>
       
       {additionalText && (
@@ -64,7 +64,7 @@ const EnhancedAppFooter: React.FC<EnhancedAppFooterProps> = ({
       
       {showCopyright && (
         <Text style={[styles.copyright, { color: textColor + '77' }, copyrightStyle]}>
-          © {new Date().getFullYear()} Zoo-Tiles. All rights reserved.
+          © {new Date().getFullYear()} Sudoku Tiles Pro. All rights reserved.
         </Text>
       )}
     </View>

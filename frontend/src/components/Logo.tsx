@@ -50,7 +50,7 @@ const Logo: React.FC<LogoProps> = ({
             fontSize: currentSize.text
           }
         ]}>
-          Zoo-Tiles
+          Sudoku Tiles Pro
         </Text>
       )}
     </View>
