@@ -1,3 +1,4 @@
+// src/components/homescreen/FactCard.tsx
 import React from 'react';
 import { 
   View, 
@@ -20,23 +21,31 @@ const FactCard: React.FC<FactCardProps> = ({
   isLoading = false,
   onRefresh 
 }) => {
-  // Extract emoji from fact or use default
-  const getEmoji = () => {
-    const emojiMatch = fact.match(/^[^\s]*/);
-    if (emojiMatch && emojiMatch[0].length <= 3) {
-      return emojiMatch[0];
+  // Clean up the fact text - remove any leading emoji and name if present
+  const getCleanedFactText = () => {
+    if (!fact) return '';
+    
+    // Check if the fact starts with an emoji pattern
+    const emojiPattern = /^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+/u;
+    const emojiMatch = fact.match(emojiPattern);
+    
+    let cleanedText = fact;
+    
+    if (emojiMatch) {
+      // Remove the emoji
+      cleanedText = fact.substring(emojiMatch[0].length).trim();
+      
+      // Check if there's a colon (fact name) and remove it
+      const colonIndex = cleanedText.indexOf(':');
+      if (colonIndex > 0 && colonIndex < 50) { // Only if colon is within first 50 chars
+        cleanedText = cleanedText.substring(colonIndex + 1).trim();
+      }
     }
-    return '🐘'; // Default emoji
+    
+    return cleanedText;
   };
 
-  // Get fact without emoji for display
-  const getFactText = () => {
-    const emoji = getEmoji();
-    if (fact.startsWith(emoji)) {
-      return fact.substring(emoji.length).trim();
-    }
-    return fact;
-  };
+  const cleanedFactText = getCleanedFactText();
 
   return (
     <View style={[styles.factCard, { backgroundColor: themeColors.button }]}>
@@ -44,14 +53,14 @@ const FactCard: React.FC<FactCardProps> = ({
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color={themeColors.text} />
           <Text style={[styles.loadingText, { color: themeColors.text }]}>
-            Fetching amazing animal fact...
+            Fetching amazing fact...
           </Text>
         </View>
       ) : (
         <>
           <View style={styles.factRow}>
             <Text style={[styles.factText, { color: themeColors.text }]}>
-              {getFactText()}
+              {cleanedFactText}
             </Text>
             {onRefresh && (
               <TouchableOpacity 
@@ -72,10 +81,10 @@ const FactCard: React.FC<FactCardProps> = ({
           
           <View style={styles.factFooter}>
             <Text style={[styles.factSource, { color: themeColors.text }]}>
-              📚 From Zoo-Tiles Animal Database
+              📚 Daily Fact
             </Text>
             <Text style={[styles.factFrequency, { color: themeColors.text }]}>
-              New fact every day!
+              New fact daily!
             </Text>
           </View>
         </>
@@ -109,18 +118,18 @@ const styles = StyleSheet.create({
   },
   factRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 15,
-  },
-  factEmoji: {
-    fontSize: 22,
-    marginRight: 10,
+    flexWrap: 'wrap', // Allow wrapping if needed
   },
   factText: {
     flex: 1,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 16, // Slightly increased for better readability
+    lineHeight: 24, // Better line spacing
     opacity: 0.95,
+    textAlign: 'left',
+    flexWrap: 'wrap',
+    flexShrink: 1,
   },
   refreshButton: {
     width: 36,
@@ -129,6 +138,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 10,
+    marginTop: -4, // Align with text
   },
   refreshText: {
     fontSize: 16,
@@ -137,6 +147,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+    paddingTop: 10,
   },
   factSource: {
     fontSize: 11,

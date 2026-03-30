@@ -170,7 +170,7 @@ const SignInScreen = () => {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Text style={styles.title}>Zootiles</Text>
+          <Text style={styles.title}>Sudoku Tiles</Text>
           <Text style={styles.subtitle}>Sign in to continue</Text>
         </View>
 

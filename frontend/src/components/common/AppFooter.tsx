@@ -18,7 +18,7 @@ const AppFooter: React.FC<AppFooterProps> = ({
   return (
     <View style={styles.container}>
       <Text style={[styles.appName, { color: textColor }]}>
-        🦓 Zoo-Tiles - Animal Puzzle Adventure
+        Sudoku-Tiles - Treasure Puzzle Adventure
       </Text>
       
       {/* Add contact email here */}

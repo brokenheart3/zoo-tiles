@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "zoo-tiles",
+    "name": "Sudoku Tiles Pro",
     "slug": "zoo-tiles",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,11 +14,20 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourname.zootiles",
+      "bundleIdentifier": "com.chamal.sudokutiles",
+      "bundleDisplayName": "Sudoku Tiles Pro",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
+      "deploymentTarget": "15.1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.136934864636-43ektognl9thv2rva0l37k1s3joutd4m"
+            ]
+          }
+        ]
       }
     },
     "android": {
@@ -40,9 +49,23 @@
       }
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "deploymentTarget": "15.1"
+          },
+          "android": {
+            "minSdkVersion": 23,
+            "targetSdkVersion": 34
+          }
+        }
+      ],
       "@react-native-google-signin/google-signin",
       "expo-apple-authentication",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-secure-store"
     ],
     "owner": "ckayssar1"
   }

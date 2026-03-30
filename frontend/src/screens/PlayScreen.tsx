@@ -9,15 +9,17 @@ import {
   fetchSequentialPuzzle,
   fetchDailyChallenge,
   fetchWeeklyChallenge,
-  PuzzleResponse
+  PuzzleResponse,
+  Category
 } from '../services/api';
-import { updateUserChallenge, getUserChallengeResult } from '../services/userService';
+import { updateUserChallenge } from '../services/userService';
 import { incrementChallengePlayerCount } from '../services/simpleChallengeService';
 import ControlButton from '../components/play/ControlButton';
 import HintButton from '../components/play/HintButton';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { auth } from '../services/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCategoryDisplayName } from '../utils/categoryHelpers';
 
 type Mode = 'sequential' | 'daily' | 'weekly';
 
@@ -27,23 +29,15 @@ const HEADER_HEIGHT = 120;
 const AVAILABLE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - 50;
 
 // Valid grid sizes that exist in the API
-const VALID_GRID_SIZES = ['6x6', '8x8', '10x10', '12x12'];
+const VALID_GRID_SIZES = ['5x5', '6x6', '7x7', '8x8', '9x9', '10x10', '11x11', '12x12', '16x16'];
 
 export default function PlayScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { settings } = useSettings();
-  const { profile, incrementPuzzlesSolved, refreshProfile, updateProfile } = useProfile();
+  const { profile, incrementPuzzlesSolved, refreshProfile } = useProfile();
   const { theme } = React.useContext(ThemeContext);
   const colors = themeStyles[theme];
-
-  // 🔥🔥🔥 MOUNT DEBUG 🔥🔥🔥
-  useEffect(() => {
-    console.log('🔥🔥🔥 PLAYSCREEN MOUNTED 🔥🔥🔥');
-    console.log('Current time:', new Date().toISOString());
-    console.log('Profile exists:', !!profile);
-    console.log('Current perfectGames:', profile?.stats?.perfectGames);
-  }, []);
 
   // Helper to get week number
   function getWeekNumber(date: Date): string {
@@ -52,15 +46,37 @@ export default function PlayScreen() {
     return String(Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7));
   }
 
-  // Extract ALL params from navigation
+  // Helper to get subgrid dimensions based on grid size
+  const getSubgridDimensions = (size: number) => {
+    // Determine appropriate subgrid divisions for each grid size
+    if (size === 5) return { rows: 1, cols: 5 }; // 5x5 as 1x5 (no subgrids)
+    if (size === 6) return { rows: 2, cols: 3 }; // 6x6 as 2x3
+    if (size === 7) return { rows: 1, cols: 7 }; // 7x7 as 1x7 (no subgrids)
+    if (size === 8) return { rows: 2, cols: 4 }; // 8x8 as 2x4
+    if (size === 9) return { rows: 3, cols: 3 }; // 9x9 as 3x3
+    if (size === 10) return { rows: 2, cols: 5 }; // 10x10 as 2x5
+    if (size === 11) return { rows: 1, cols: 11 }; // 11x11 as 1x11 (no subgrids)
+    if (size === 12) return { rows: 3, cols: 4 }; // 12x12 as 3x4
+    if (size === 16) return { rows: 4, cols: 4 }; // 16x16 as 4x4
+    
+    // Default fallback for any other size
+    const sqrt = Math.sqrt(size);
+    const rows = Math.floor(sqrt);
+    const cols = Math.ceil(size / rows);
+    return { rows, cols };
+  };
+
+  // Extract ALL params from navigation including category
   const params = route.params ?? {};
-  const { challengeType, gridSize, difficulty, challengeId } = params;
+  const { challengeType, gridSize, difficulty, challengeId, category: routeCategory } = params;
 
   console.log('🔍 PlayScreen - Raw params:', JSON.stringify(params, null, 2));
-  console.log('🔍 PlayScreen - Settings from context:', JSON.stringify(settings, null, 2));
 
   // Determine mode from challengeType
   const mode: Mode = challengeType ?? 'sequential';
+
+  // Get category from params or settings (with proper typing)
+  const selectedCategory: Category = routeCategory || (settings as any).category || 'animals';
 
   // Validate grid size - only allow sizes that exist in API
   const requestedGridSize = gridSize || settings.gridSize || '8x8';
@@ -75,38 +91,31 @@ export default function PlayScreen() {
   if (requestedGridSize !== effectiveGridSize) {
     console.log('⚠️ Grid size validation:', { 
       requested: requestedGridSize, 
-      effective: effectiveGridSize,
-      valid: VALID_GRID_SIZES
+      effective: effectiveGridSize
     });
   }
 
-  // Get challenge ID for daily/weekly
+  // Get challenge ID for daily/weekly (includes category)
   const getChallengeId = () => {
     if (mode === 'daily') {
-      return challengeId || `daily-${new Date().toISOString().split('T')[0]}`;
+      return challengeId || `daily-${new Date().toISOString().split('T')[0]}-${selectedCategory}`;
     } else if (mode === 'weekly') {
-      return challengeId || `weekly-${getWeekNumber(new Date())}`;
+      return challengeId || `weekly-${getWeekNumber(new Date())}-${selectedCategory}`;
     }
     return undefined;
   };
 
   const currentChallengeId = getChallengeId();
 
-  // Log week number for debugging
-  if (mode === 'weekly') {
-    console.log('📅 Weekly challenge - Current week number:', getWeekNumber(new Date()));
-    console.log('📅 Weekly challenge ID:', currentChallengeId);
-  }
-
   console.log('🔍 PlayScreen - Using:', {
     mode,
+    category: selectedCategory,
     gridSize: effectiveGridSize,
     difficulty: effectiveDifficulty,
     challengeId: currentChallengeId
   });
 
   const sizeNumber = parseInt(effectiveGridSize);
-  const totalCells = sizeNumber * sizeNumber;
   
   // Calculate grid size based on screen dimensions
   const MAX_GRID_SIZE = Math.min(
@@ -132,7 +141,7 @@ export default function PlayScreen() {
   const [gameCompleted, setGameCompleted] = useState(false);
 
   // ======================
-  // Load puzzle based on mode
+  // Load puzzle based on mode and category
   // ======================
   const loadPuzzle = useCallback(async () => {
     setLoading(true);
@@ -143,19 +152,22 @@ export default function PlayScreen() {
 
       console.log('🎮 PlayScreen - Calling API with:', {
         mode,
+        category: selectedCategory,
         size: sizeNumber,
         difficulty: effectiveDifficulty
       });
 
       if (mode === 'daily') {
-        puzzle = await fetchDailyChallenge(sizeNumber, effectiveDifficulty);
+        puzzle = await fetchDailyChallenge(selectedCategory, sizeNumber, effectiveDifficulty);
       } else if (mode === 'weekly') {
-        puzzle = await fetchWeeklyChallenge(sizeNumber, effectiveDifficulty);
+        puzzle = await fetchWeeklyChallenge(selectedCategory, sizeNumber, effectiveDifficulty);
       } else {
-        puzzle = await fetchSequentialPuzzle(sizeNumber, effectiveDifficulty);
+        puzzle = await fetchSequentialPuzzle(selectedCategory, sizeNumber, effectiveDifficulty);
       }
 
-      if (!puzzle) throw new Error(`No puzzle returned for mode: ${mode}`);
+      if (!puzzle) {
+        throw new Error(`No puzzle available for ${getCategoryDisplayName(selectedCategory)} category. Please try another category.`);
+      }
 
       setPuzzleData(puzzle);
       setUserGrid(puzzle.puzzle.map(r => [...r]));
@@ -170,15 +182,15 @@ export default function PlayScreen() {
       timerRunning.current = false;
       if (timerRef.current) clearInterval(timerRef.current);
 
-      console.log('✅ Loaded puzzle:', puzzle.id, 'with difficulty:', puzzle.difficulty);
+      console.log('✅ Loaded puzzle:', puzzle.id, 'with difficulty:', puzzle.difficulty, 'category:', puzzle.category);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('❌ Failed to load puzzle:', err);
-      setError(`Failed to load puzzle. Check console.`);
+      setError(err.message || 'Failed to load puzzle. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [mode, sizeNumber, effectiveDifficulty]);
+  }, [mode, selectedCategory, sizeNumber, effectiveDifficulty]);
 
   // Initial load
   useEffect(() => {
@@ -245,7 +257,7 @@ export default function PlayScreen() {
   // ======================
   const goToResults = (timeInSeconds: number, isPerfect: boolean, accuracy: number) => {
     if (mode === 'daily' || mode === 'weekly') {
-      // For challenges, go to challenge results
+      // For challenges, go to challenge results with category
       navigation.replace('ChallengeResults', {
         challengeId: currentChallengeId,
         challengeType: mode,
@@ -256,15 +268,17 @@ export default function PlayScreen() {
         wrongMoves,
         accuracy,
         completed: true,
+        category: selectedCategory,
       });
     } else {
-      // For sequential, go to game results
+      // For sequential, go to game results with category
       navigation.replace('GameResults', {
         time: timeInSeconds,
         isPerfect,
         mode,
         difficulty: effectiveDifficulty,
         gridSize: effectiveGridSize,
+        category: selectedCategory,
         moves,
         correctMoves,
         wrongMoves,
@@ -291,14 +305,10 @@ export default function PlayScreen() {
 
       console.log('💾 SAVING CHALLENGE RESULT:', {
         uid: user.uid,
-        email: user.email,
         challengeId: currentChallengeId,
         mode: mode,
+        category: selectedCategory,
         time: timeInSeconds,
-        moves,
-        correctMoves,
-        wrongMoves,
-        accuracy,
         isPerfect
       });
 
@@ -380,24 +390,20 @@ export default function PlayScreen() {
         setGameCompleted(true);
         
         const accuracy = calculateAccuracy();
-        const isPerfect = wrongMoves === 0; // SIMPLIFIED: if no wrong moves at all
+        const isPerfect = wrongMoves === 0;
         const isWeekend = [0, 6].includes(new Date().getDay());
         
-        console.log('🎯 GAME COMPLETED - isPerfect:', isPerfect, 'wrongMoves:', wrongMoves);
+        console.log('🎯 GAME COMPLETED - isPerfect:', isPerfect, 'category:', selectedCategory);
 
-        // ======================
-        // DIRECT PERFECT GAME HANDLING - NO COMPLEX LOGIC
-        // ======================
+        // Handle perfect game
         if (isPerfect) {
           try {
             console.log('✨ PERFECT GAME ACHIEVED! Current perfectGames:', profile?.stats?.perfectGames);
             
-            // Get current profile
             const currentProfile = profile;
             if (currentProfile) {
               const newPerfectGames = (currentProfile.stats.perfectGames || 0) + 1;
               
-              // Create updated profile
               const updatedProfile = {
                 ...currentProfile,
                 stats: {
@@ -406,24 +412,21 @@ export default function PlayScreen() {
                 }
               };
               
-              // Save to AsyncStorage
               await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
               console.log('✅ Saved to AsyncStorage, new perfectGames:', newPerfectGames);
               
-              // Force refresh
               await refreshProfile();
               
-              // Show success
-              Alert.alert('✨ Perfect Game!', `Perfect games: ${newPerfectGames}`);
+              Alert.alert('✨ Perfect Game!', `Perfect games: ${newPerfectGames}\nCategory: ${selectedCategory}`);
             }
           } catch (error) {
             console.error('❌ Error saving perfect game:', error);
           }
         } else {
-          Alert.alert('🎉 Game Completed!', `Not perfect - wrong moves: ${wrongMoves}`);
+          Alert.alert('🎉 Game Completed!', `Category: ${selectedCategory}\nWrong moves: ${wrongMoves}`);
         }
 
-        // Also call the original function for other stats
+        // Update other stats
         if (profile) {
           const isDaily = mode === 'daily';
           const isWeekly = mode === 'weekly';
@@ -442,7 +445,7 @@ export default function PlayScreen() {
         
         if (mode !== 'sequential') {
           await saveChallengeResult(timer, isPerfect, accuracy);
-          await incrementChallengePlayerCount(mode);
+          await incrementChallengePlayerCount(mode, selectedCategory);
         }
       }
     }
@@ -502,24 +505,53 @@ export default function PlayScreen() {
   // ======================
   // Render
   // ======================
-  if (loading) return (
-    <View style={[styles.centered, { backgroundColor: colors.background }]}>
-      <ActivityIndicator size="large" color={colors.button} />
-      <Text style={[styles.loadingText, { color: colors.text }]}>Loading puzzle…</Text>
-    </View>
-  );
+  if (loading) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.button} />
+        <Text style={[styles.loadingText, { color: colors.text }]}>
+          Loading {getCategoryDisplayName(selectedCategory)} puzzle...
+        </Text>
+      </View>
+    );
+  }
 
-  if (error) return (
-    <View style={[styles.centered, { backgroundColor: colors.background }]}>
-      <Text style={[styles.errorText, { color: colors.text }]}>{error}</Text>
-      <ControlButton title="Retry" onPress={loadPuzzle} wide />
-    </View>
-  );
+  if (error) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={[styles.errorText, { color: colors.text }]}>{error}</Text>
+        <View style={styles.errorButtons}>
+          <ControlButton title="Go Back" onPress={() => navigation.goBack()} wide />
+          <View style={{ height: 10 }} />
+          <ControlButton title="Try Again" onPress={loadPuzzle} wide />
+        </View>
+      </View>
+    );
+  }
 
-  if (!puzzleData) return null;
+  if (!puzzleData) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={[styles.errorText, { color: colors.text }]}>
+          No puzzle data available for {getCategoryDisplayName(selectedCategory)}.
+        </Text>
+        <View style={styles.errorButtons}>
+          <ControlButton title="Go Back" onPress={() => navigation.goBack()} wide />
+          <View style={{ height: 10 }} />
+          <ControlButton title="Change Category" onPress={() => navigation.navigate('Settings')} wide />
+        </View>
+      </View>
+    );
+  }
 
-  const gameTitle = mode === 'daily' ? 'Daily Challenge' : mode === 'weekly' ? 'Weekly Challenge' : 'Sequential';
+  const gameTitle = mode === 'daily' 
+    ? `Daily ${getCategoryDisplayName(selectedCategory)} Challenge` 
+    : mode === 'weekly' 
+    ? `Weekly ${getCategoryDisplayName(selectedCategory)} Challenge` 
+    : `${getCategoryDisplayName(selectedCategory)} Puzzle`;
+    
   const currentAccuracy = calculateAccuracy();
+  const subgridDims = getSubgridDimensions(sizeNumber);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -566,32 +598,17 @@ export default function PlayScreen() {
                   else if (sameAnimalSelected) bgColor = colors.button + '80';
                   else if (clickedCell && (r === clickedCell.row || c === clickedCell.col)) bgColor = colors.button + '20';
 
-                  let isSubgridTop = false;
-                  let isSubgridBottom = false;
-                  let isSubgridLeft = false;
-                  let isSubgridRight = false;
+                  // Calculate subgrid borders dynamically for all grid sizes
+                  const isSubgridTop = r > 0 && r % subgridDims.rows === 0;
+                  const isSubgridBottom = r === sizeNumber - 1 || (r + 1) % subgridDims.rows === 0;
+                  const isSubgridLeft = c > 0 && c % subgridDims.cols === 0;
+                  const isSubgridRight = c === sizeNumber - 1 || (c + 1) % subgridDims.cols === 0;
 
-                  if (sizeNumber === 6) {
-                    isSubgridTop = r % 2 === 0;
-                    isSubgridBottom = (r + 1) % 2 === 0;
-                    isSubgridLeft = c % 3 === 0;
-                    isSubgridRight = (c + 1) % 3 === 0;
-                  } else if (sizeNumber === 8) {
-                    isSubgridTop = r % 2 === 0;
-                    isSubgridBottom = (r + 1) % 2 === 0;
-                    isSubgridLeft = c % 4 === 0;
-                    isSubgridRight = (c + 1) % 4 === 0;
-                  } else if (sizeNumber === 10) {
-                    isSubgridTop = r % 2 === 0;
-                    isSubgridBottom = (r + 1) % 2 === 0;
-                    isSubgridLeft = c % 5 === 0;
-                    isSubgridRight = (c + 1) % 5 === 0;
-                  } else if (sizeNumber === 12) {
-                    isSubgridTop = r % 3 === 0;
-                    isSubgridBottom = (r + 1) % 3 === 0;
-                    isSubgridLeft = c % 4 === 0;
-                    isSubgridRight = (c + 1) % 4 === 0;
-                  }
+                  // Border thickness based on position
+                  const borderTopWidth = r === 0 ? 3 : (isSubgridTop ? 2 : 0.5);
+                  const borderBottomWidth = r === sizeNumber - 1 ? 3 : (isSubgridBottom ? 2 : 0.5);
+                  const borderLeftWidth = c === 0 ? 3 : (isSubgridLeft ? 2 : 0.5);
+                  const borderRightWidth = c === sizeNumber - 1 ? 3 : (isSubgridRight ? 2 : 0.5);
 
                   return (
                     <TouchableOpacity
@@ -602,10 +619,10 @@ export default function PlayScreen() {
                         justifyContent: 'center',
                         alignItems: 'center',
                         backgroundColor: bgColor,
-                        borderTopWidth: r === 0 ? 3 : (isSubgridTop ? 2 : 0.5),
-                        borderBottomWidth: r === sizeNumber - 1 ? 3 : (isSubgridBottom ? 2 : 0.5),
-                        borderLeftWidth: c === 0 ? 3 : (isSubgridLeft ? 2 : 0.5),
-                        borderRightWidth: c === sizeNumber - 1 ? 3 : (isSubgridRight ? 2 : 0.5),
+                        borderTopWidth,
+                        borderBottomWidth,
+                        borderLeftWidth,
+                        borderRightWidth,
                         borderTopColor: r === 0 || isSubgridTop ? '#000000' : colors.border,
                         borderBottomColor: r === sizeNumber - 1 || isSubgridBottom ? '#000000' : colors.border,
                         borderLeftColor: c === 0 || isSubgridLeft ? '#000000' : colors.border,
@@ -692,18 +709,23 @@ const styles = StyleSheet.create({
   centered: { 
     flex: 1, 
     justifyContent: 'center', 
-    alignItems: 'center' 
+    alignItems: 'center',
+    padding: 20,
   },
   loadingText: { 
     marginTop: 16, 
     fontSize: 16, 
-    fontWeight: '600' 
+    fontWeight: '600',
+    textAlign: 'center',
   },
   errorText: { 
-    marginTop: 8, 
-    fontSize: 14, 
+    fontSize: 16, 
     textAlign: 'center', 
-    paddingHorizontal: 20 
+    marginBottom: 20,
+  },
+  errorButtons: {
+    width: '100%',
+    maxWidth: 300,
   },
   header: { 
     width: '100%',

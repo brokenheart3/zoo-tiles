@@ -164,7 +164,7 @@ app.get("/animals/facts", async (req, res) => {
 // Start Server
 // =========================
 app.listen(PORT, () => {
-  console.log(`Zoo Tiles API running at http://localhost:${PORT}`);
+  console.log(`Sudoku Tiles API running at http://localhost:${PORT}`);
 });
 
 

@@ -1,19 +1,24 @@
 // src/services/simpleChallengeService.ts
 import { db } from './firebase';
 import { doc, getDoc, setDoc, increment, collection, getDocs } from 'firebase/firestore';
+import { Category } from './api';
 
-export const getChallengePlayerCount = async (type: 'daily' | 'weekly'): Promise<number> => {
+export const getChallengePlayerCount = async (
+  type: 'daily' | 'weekly',
+  category?: Category
+): Promise<number> => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const weekNumber = getWeekNumber(new Date());
     
+    // Include category in challenge ID if provided
     const challengeId = type === 'daily' 
-      ? `daily-${today}`
-      : `weekly-${weekNumber}`;
+      ? category ? `daily-${today}-${category}` : `daily-${today}`
+      : category ? `weekly-${weekNumber}-${category}` : `weekly-${weekNumber}`;
     
-    console.log(`🔍 Getting player count for ${type} challenge:`, challengeId);
+    console.log(`🔍 Getting player count for ${type} challenge (${category || 'default'}):`, challengeId);
     
-    // METHOD 1: Try to get from challenge_participants collection (exists in rules)
+    // METHOD 1: Try to get from challenge_participants collection
     try {
       const participantsRef = doc(db, 'challenge_participants', challengeId);
       const participantsDoc = await getDoc(participantsRef);
@@ -44,7 +49,7 @@ export const getChallengePlayerCount = async (type: 'daily' | 'weekly'): Promise
       console.log(`No ${type} challenge document found`);
     }
     
-    // METHOD 3: Count from users' challenges (if you have permission)
+    // METHOD 3: Count from users' challenges
     try {
       console.log('🔍 Counting from users challenges...');
       const usersRef = collection(db, 'users');
@@ -85,16 +90,20 @@ export const getChallengePlayerCount = async (type: 'daily' | 'weekly'): Promise
   }
 };
 
-export const incrementChallengePlayerCount = async (type: 'daily' | 'weekly'): Promise<void> => {
+export const incrementChallengePlayerCount = async (
+  type: 'daily' | 'weekly',
+  category?: Category
+): Promise<void> => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const weekNumber = getWeekNumber(new Date());
     
+    // Include category in challenge ID if provided
     const challengeId = type === 'daily' 
-      ? `daily-${today}`
-      : `weekly-${weekNumber}`;
+      ? category ? `daily-${today}-${category}` : `daily-${today}`
+      : category ? `weekly-${weekNumber}-${category}` : `weekly-${weekNumber}`;
     
-    console.log(`📈 Incrementing player count for ${type} challenge:`, challengeId);
+    console.log(`📈 Incrementing player count for ${type} challenge (${category || 'default'}):`, challengeId);
     
     // Try to increment in challenge_participants collection
     try {
@@ -103,7 +112,8 @@ export const incrementChallengePlayerCount = async (type: 'daily' | 'weekly'): P
         playerCount: increment(1),
         lastUpdated: new Date().toISOString(),
         type,
-        challengeId
+        challengeId,
+        category: category || 'default'
       }, { merge: true });
       
       console.log(`✅ Player count incremented in challenge_participants`);
@@ -118,7 +128,8 @@ export const incrementChallengePlayerCount = async (type: 'daily' | 'weekly'): P
       const challengeRef = doc(db, collectionName, challengeId);
       await setDoc(challengeRef, {
         participants: increment(1),
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
+        category: category || 'default'
       }, { merge: true });
       
       console.log(`✅ Player count incremented in ${collectionName}`);
@@ -128,6 +139,72 @@ export const incrementChallengePlayerCount = async (type: 'daily' | 'weekly'): P
     
   } catch (error: any) {
     console.error('❌ Error incrementing player count:', error.code, error.message);
+  }
+};
+
+// Helper function to get player counts for all categories
+export const getAllCategoryPlayerCounts = async (type: 'daily' | 'weekly'): Promise<Record<string, number>> => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const weekNumber = getWeekNumber(new Date());
+    const baseId = type === 'daily' ? `daily-${today}` : `weekly-${weekNumber}`;
+    
+    const counts: Record<string, number> = {};
+    
+    // Try to get from challenge_participants
+    try {
+      const participantsRef = collection(db, 'challenge_participants');
+      const participantsSnapshot = await getDocs(participantsRef);
+      
+      participantsSnapshot.forEach(doc => {
+        const id = doc.id;
+        if (id.startsWith(baseId)) {
+          const category = id.replace(`${baseId}-`, '');
+          const data = doc.data();
+          counts[category] = data.playerCount || 0;
+        }
+      });
+    } catch (error) {
+      console.log('Could not get category counts from participants');
+    }
+    
+    return counts;
+  } catch (error) {
+    console.error('Error getting category counts:', error);
+    return {};
+  }
+};
+
+// Helper function to reset challenge count (for testing)
+export const resetChallengePlayerCount = async (
+  type: 'daily' | 'weekly',
+  category?: Category
+): Promise<void> => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const weekNumber = getWeekNumber(new Date());
+    
+    const challengeId = type === 'daily' 
+      ? category ? `daily-${today}-${category}` : `daily-${today}`
+      : category ? `weekly-${weekNumber}-${category}` : `weekly-${weekNumber}`;
+    
+    // Reset in challenge_participants
+    try {
+      const participantsRef = doc(db, 'challenge_participants', challengeId);
+      await setDoc(participantsRef, {
+        playerCount: 0,
+        lastUpdated: new Date().toISOString(),
+        type,
+        challengeId,
+        category: category || 'default'
+      }, { merge: true });
+      
+      console.log(`✅ Player count reset for ${challengeId}`);
+    } catch (error) {
+      console.error('❌ Could not reset player count');
+    }
+  } catch (error) {
+    console.error('Error resetting player count:', error);
   }
 };
 

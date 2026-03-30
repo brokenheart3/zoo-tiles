@@ -1,14 +1,16 @@
 // src/context/SettingsContext.tsx
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Category } from '../services/api'; // Import Category type
 
 // Types
-export type GridSize = '6x6' | '8x8' | '10x10' | '12x12';
+export type GridSize =  '5x5' | '6x6' | '7x7' | '8x8' | '9x9' | '10x10' | '11x11'| '12x12' | '16x16';
 export type Difficulty = 'Easy' | 'Medium' | 'Hard' | 'Expert';
 
 export interface AppSettings {
   gridSize: GridSize;
   difficulty: Difficulty;
+  category: Category; // Add category
   soundEnabled: boolean;
   notificationsEnabled: boolean;
   hapticFeedback: boolean;
@@ -23,6 +25,7 @@ interface SettingsContextType {
 const defaultSettings: AppSettings = {
   gridSize: '8x8',
   difficulty: 'Medium',
+  category: 'animals', // Default category
   soundEnabled: true,
   notificationsEnabled: true,
   hapticFeedback: true,
@@ -44,7 +47,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const savedSettings = await AsyncStorage.getItem('appSettings');
       if (savedSettings) {
-        setSettings(JSON.parse(savedSettings));
+        const parsed = JSON.parse(savedSettings);
+        // Ensure category exists (for backward compatibility)
+        if (!parsed.category) {
+          parsed.category = 'animals';
+        }
+        setSettings(parsed);
       }
     } catch (error) {
       console.error('Failed to load settings:', error);

@@ -1,5 +1,6 @@
 // src/navigation/goToPlay.ts
 import { NavigationProp } from '@react-navigation/native';
+import { Category } from '../services/api';
 
 export type GameMode = 'sequential' | 'daily' | 'weekly';
 
@@ -16,16 +17,21 @@ const getWeekNumber = (date: Date) => {
 export const goToPlay = (
   navigation: NavigationProp<any>,
   mode: GameMode,
-  options?: { gridSize?: string; difficulty?: string }
+  options?: { 
+    gridSize?: string; 
+    difficulty?: string;
+    category?: Category;
+  }
 ) => {
   const params = {
     gridSize: options?.gridSize || '8x8',
     difficulty: options?.difficulty || 'Medium',
+    category: options?.category || 'animals',
     challengeType: mode === 'sequential' ? undefined : mode,
     challengeId: mode === 'daily' 
-        ? `daily-${new Date().toISOString().split('T')[0]}`
+        ? `daily-${new Date().toISOString().split('T')[0]}-${options?.category || 'animals'}`
         : mode === 'weekly'
-        ? `weekly-${getWeekNumber(new Date())}`
+        ? `weekly-${getWeekNumber(new Date())}-${options?.category || 'animals'}`
         : undefined
   };
   

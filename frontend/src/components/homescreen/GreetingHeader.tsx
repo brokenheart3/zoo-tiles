@@ -75,8 +75,7 @@ const GreetingHeader: React.FC<GreetingHeaderProps> = ({
         </Text>
       </View>
       <View style={[styles.logoContainer, { backgroundColor: themeColors.button }]}>
-        <Text style={styles.logoEmoji}>🦓</Text>
-        <Text style={[styles.logoText, { color: themeColors.text }]}>Zoo-Tiles</Text>
+        <Text style={[styles.logoText, { color: themeColors.text }]}>Sudoku Tiles</Text>
       </View>
     </View>
   );

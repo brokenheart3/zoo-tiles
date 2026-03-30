@@ -1,10 +1,7 @@
 // -----------------------------
-// Animal Symbols for Zoo-Tiles
+// Animal Symbols for Sudoku-Tiles
 // -----------------------------
 
-// Map numbers (1..N) to animal names or emojis
-// The number matches the 'value' in Cell type
-// Example: 1 → Lion, 2 → Tiger, etc.
 export const ANIMALS: Record<number, string> = {
   1: "🦁", // Lion
   2: "🐯", // Tiger
@@ -28,13 +25,4 @@ export function getAnimal(value: number | null): string | null {
   return ANIMALS[value] ?? null;
 }
 
-// -----------------------------
-// Example usage
-// -----------------------------
-/*
-import { getAnimal } from "./animals";
 
-console.log(getAnimal(1)); // 🦁
-console.log(getAnimal(5)); // 🦒
-console.log(getAnimal(null)); // null
-*/

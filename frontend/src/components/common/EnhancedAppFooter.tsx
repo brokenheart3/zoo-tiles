@@ -44,7 +44,7 @@ const EnhancedAppFooter: React.FC<EnhancedAppFooterProps> = ({
       
       {showLogo && (
         <Text style={[styles.logo, { color: textColor }, textStyle]}>
-          🦓 Zoo-Tiles
+          Sudoku-Tiles
         </Text>
       )}
       

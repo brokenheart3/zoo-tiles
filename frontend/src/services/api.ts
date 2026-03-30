@@ -1,10 +1,19 @@
 // src/services/api.ts
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCategoryEmoji, getCategoryDisplayName } from '../utils/categoryHelpers';
 
 // ============================
 // TYPES
 // ============================
+
+export type Category = 
+  | 'aircraft' | 'animals' | 'arabic' | 'birds' | 'bugs' | 'cars' | 'clothing' 
+  | 'colors' | 'cyrillic' | 'devanagari' | 'emotions' | 'fantasy' | 'fish' 
+  | 'flags' | 'flowers' | 'food' | 'fruits' | 'games' | 'geography' | 'greek' 
+  | 'hebrew' | 'holidays' | 'latin' | 'math' | 'music' | 'numbers' | 'office' 
+  | 'planets' | 'plants' | 'roadSigns' | 'science' | 'shapes' | 'sports' | 'tech' 
+  | 'time' | 'tools' | 'trains' | 'transport' | 'vegetables' | 'weather';
 
 export interface Puzzle {
   id: number;
@@ -19,6 +28,12 @@ export interface PuzzleResponse extends Puzzle {
   category?: string;
 }
 
+export interface CategoryFact {
+  name: string;
+  facts: string[];
+}
+
+// Legacy Fact interface for backward compatibility
 export interface Fact {
   id: number;
   name: string;
@@ -30,8 +45,7 @@ export interface Fact {
 // BASE URL
 // ============================
 
-const BASE_URL =
-  'https://raw.githubusercontent.com/brokenheart3/sudoAPI/main/animals';
+const BASE_URL = 'https://raw.githubusercontent.com/brokenheart3/sudoAPI/main';
 
 // ============================
 // AXIOS
@@ -56,92 +70,157 @@ const loadJson = async <T>(url: string): Promise<T> => {
 // HELPER: Map difficulty to folder name
 // ============================
 const getDifficultyFolder = (difficulty: string): string => {
-  console.log('🔧 getDifficultyFolder - Input:', difficulty);
-  
-  // Convert to lowercase and trim
   const difficultyLower = difficulty?.toLowerCase().trim() || 'easy';
-  console.log('🔧 getDifficultyFolder - Lowercase:', difficultyLower);
-  
-  let folder = 'easy'; // default
   
   switch (difficultyLower) {
-    case 'easy':
-      folder = 'easy';
-      break;
-    case 'medium':
-      folder = 'medium';
-      break;
-    case 'hard':
-      folder = 'hard';
-      break;
-    case 'expert':
-      folder = 'expert';
-      break;
-    default:
-      console.log('🔧 getDifficultyFolder - Unknown difficulty, using easy');
-      folder = 'easy';
+    case 'easy': return 'easy';
+    case 'medium': return 'medium';
+    case 'hard': return 'hard';
+    case 'expert': return 'expert';
+    default: return 'easy';
   }
-  
-  console.log('🔧 getDifficultyFolder - Selected folder:', folder);
-  return folder;
 };
 
 // ============================
-// CORE: GET RANDOM PUZZLE FROM REPO BY DIFFICULTY
+// HELPER: Get category folder name
+// ============================
+const getCategoryFolder = (category: Category): string => {
+  // Direct mapping - folder names match category names exactly
+  const categoryMap: Record<Category, string> = {
+    aircraft: 'aircraft',
+    animals: 'animals',
+    arabic: 'arabic',
+    birds: 'birds',
+    bugs: 'bugs',
+    cars: 'cars',
+    clothing: 'clothing',
+    colors: 'colors',
+    cyrillic: 'cyrillic',
+    devanagari: 'devanagari',
+    emotions: 'emotions',
+    fantasy: 'fantasy',
+    fish: 'fish',
+    flags: 'flags',
+    flowers: 'flowers',
+    food: 'food',
+    fruits: 'fruits',
+    games: 'games',
+    geography: 'geography',
+    greek: 'greek',
+    hebrew: 'hebrew',
+    holidays: 'holidays',
+    latin: 'latin',
+    math: 'math',
+    music: 'music',
+    numbers: 'numbers',
+    office: 'office',
+    planets: 'planets',
+    plants: 'plants',
+    roadSigns: 'roadSigns',
+    science: 'science',
+    shapes: 'shapes',
+    sports: 'sports',
+    tech: 'tech',
+    time: 'time',
+    tools: 'tools',
+    trains: 'trains',
+    transport: 'transport',
+    vegetables: 'vegetables',
+    weather: 'weather',
+  };
+  
+  return categoryMap[category] || 'animals';
+};
+
+// ============================
+// HELPER: Get all available categories
+// ============================
+export const getAllCategories = (): Category[] => {
+  return [
+    'aircraft', 'animals', 'arabic', 'birds', 'bugs', 'cars', 'clothing',
+    'colors', 'cyrillic', 'devanagari', 'emotions', 'fantasy', 'fish',
+    'flags', 'flowers', 'food', 'fruits', 'games', 'geography', 'greek',
+    'hebrew', 'holidays', 'latin', 'math', 'music', 'numbers', 'office',
+    'planets', 'plants', 'roadSigns', 'science', 'shapes', 'sports', 'tech',
+    'time', 'tools', 'trains', 'transport', 'vegetables', 'weather'
+  ];
+};
+
+// ============================
+// HELPER: Get category display info
+// ============================
+export const getCategoryInfo = (category: Category) => {
+  return {
+    id: category,
+    name: getCategoryDisplayName(category),
+    emoji: getCategoryEmoji(category),
+    folder: getCategoryFolder(category),
+  };
+};
+
+// ============================
+// CORE: GET RANDOM PUZZLE FROM REPO BY CATEGORY AND DIFFICULTY
 // ============================
 
-async function getPuzzleFromRepo(size: number, difficulty: string): Promise<PuzzleResponse> {
+async function getPuzzleFromRepo(
+  category: Category, 
+  size: number, 
+  difficulty: string
+): Promise<PuzzleResponse> {
   const difficultyFolder = getDifficultyFolder(difficulty);
+  const categoryFolder = getCategoryFolder(category);
   
   console.log('========== DEBUG ==========');
-  console.log('1. Trying to fetch:', `${BASE_URL}/${size}/${difficultyFolder}/index.json`);
+  console.log('Category:', category);
+  console.log('Size:', size);
+  console.log('Difficulty:', difficulty);
   
-  try {
-    const indexUrl = `${BASE_URL}/${size}/${difficultyFolder}/index.json`;
-    const index = await loadJson<any>(indexUrl);
-    console.log('2. Index loaded successfully:', index);
-    
-    const files = index.files;
-    console.log('3. Files array:', files);
-    
-    if (files && files.length > 0) {
-      const randomIndex = Math.floor(Math.random() * files.length);
-      const randomFile = files[randomIndex].file;
-      console.log('4. Selected file:', randomFile);
-      
-      const fileUrl = `${BASE_URL}/${size}/${difficultyFolder}/${randomFile}`;
-      console.log('5. Fetching puzzle file:', fileUrl);
-      
-      const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
-      console.log('6. Loaded puzzles count:', puzzles?.length);
-      
-      if (puzzles && puzzles.length > 0) {
-        const puzzleIndex = Math.floor(Math.random() * puzzles.length);
-        const puzzle = puzzles[puzzleIndex];
-        console.log('7. Selected puzzle:', puzzle);
-        console.log('=========================');
-        return puzzle;
-      }
-    }
-    throw new Error('No files or puzzles found');
-  } catch (error) {
-    console.log('❌ ERROR:', error);
-    console.log('=========================');
-    throw error;
+  const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
+  console.log('Fetching index:', indexUrl);
+  
+  const index = await loadJson<any>(indexUrl);
+  const files = index.files;
+  
+  if (!files || files.length === 0) {
+    throw new Error('No files found in index');
   }
+  
+  // Handle both string[] and object[] formats
+  const fileEntries = files.map((f: any) => typeof f === 'string' ? { file: f } : f);
+  
+  const randomIndex = Math.floor(Math.random() * fileEntries.length);
+  const randomFile = fileEntries[randomIndex].file;
+  console.log('Selected file:', randomFile);
+  
+  const fileUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/${randomFile}`;
+  console.log('Fetching puzzle file:', fileUrl);
+  
+  const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
+  
+  if (!puzzles || puzzles.length === 0) {
+    throw new Error('No puzzles found in file');
+  }
+  
+  const puzzleIndex = Math.floor(Math.random() * puzzles.length);
+  const puzzle = puzzles[puzzleIndex];
+  console.log('Selected puzzle ID:', puzzle.id);
+  console.log('=========================');
+  
+  return { ...puzzle, category };
 }
 
 // ============================
-// 1️⃣ SEQUENTIAL - ACCEPTS DIFFICULTY
+// 1️⃣ SEQUENTIAL - RANDOM PUZZLE BY CATEGORY AND DIFFICULTY
 // ============================
 
 export async function fetchSequentialPuzzle(
+  category: Category = 'animals',
   size: number,
   difficulty: string = 'easy'
 ): Promise<PuzzleResponse | null> {
-  console.log('🎮 fetchSequentialPuzzle - Called with:', { size, difficulty });
+  console.log('🎮 fetchSequentialPuzzle - Called with:', { category, size, difficulty });
   try {
-    const puzzle = await getPuzzleFromRepo(size, difficulty);
+    const puzzle = await getPuzzleFromRepo(category, size, difficulty);
     console.log('🎮 fetchSequentialPuzzle - Success');
     return puzzle;
   } catch (err) {
@@ -151,25 +230,28 @@ export async function fetchSequentialPuzzle(
 }
 
 // ============================
-// 2️⃣ DAILY - ACCEPTS DIFFICULTY
+// 2️⃣ DAILY CHALLENGE - DETERMINISTIC PUZZLE BASED ON DAY
 // ============================
 
 export async function fetchDailyChallenge(
+  category: Category = 'animals',
   size: number,
   difficulty: string = 'easy'
 ): Promise<PuzzleResponse | null> {
-  console.log('📅 fetchDailyChallenge - Called with:', { size, difficulty });
+  console.log('📅 fetchDailyChallenge - Called with:', { category, size, difficulty });
   try {
     const difficultyFolder = getDifficultyFolder(difficulty);
+    const categoryFolder = getCategoryFolder(category);
     
-    // Get all puzzles for this difficulty
-    const indexUrl = `${BASE_URL}/${size}/${difficultyFolder}/index.json`;
+    const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
     console.log('📅 Loading daily index from:', indexUrl);
     
     const index = await loadJson<any>(indexUrl);
     const files = index.files;
+    
+    // Handle both string[] and object[] formats
+    const fileEntries = files.map((f: any) => typeof f === 'string' ? { file: f } : f);
 
-    // Calculate day of year for deterministic selection
     const now = new Date();
     const start = new Date(now.getFullYear(), 0, 0);
     const diff = now.getTime() - start.getTime();
@@ -178,51 +260,49 @@ export async function fetchDailyChallenge(
     
     console.log('📅 Day of year:', dayOfYear);
 
-    // Pick file deterministically
-    const fileIndex = dayOfYear % files.length;
-    const file = files[fileIndex].file;
-    console.log(`📅 Selected file ${fileIndex + 1}/${files.length}:`, file);
+    const fileIndex = dayOfYear % fileEntries.length;
+    const file = fileEntries[fileIndex].file;
+    console.log(`📅 Selected file ${fileIndex + 1}/${fileEntries.length}:`, file);
 
-    // Load puzzles from file
-    const fileUrl = `${BASE_URL}/${size}/${difficultyFolder}/${file}`;
+    const fileUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/${file}`;
     const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
 
-    // Pick puzzle deterministically
     const puzzleIndex = dayOfYear % puzzles.length;
     const puzzle = puzzles[puzzleIndex];
     
     console.log(`📅 Selected puzzle ${puzzleIndex + 1}/${puzzles.length}`);
     console.log('✅ Daily puzzle loaded');
     
-    return puzzle;
+    return { ...puzzle, category };
   } catch (err) {
     console.error('❌ Daily fetch failed:', err);
-    
-    // Fallback to sequential if daily fails
-    console.log('📅 Falling back to sequential puzzle');
-    return fetchSequentialPuzzle(size, difficulty);
+    return null;
   }
 }
 
 // ============================
-// 3️⃣ WEEKLY - ACCEPTS DIFFICULTY
+// 3️⃣ WEEKLY CHALLENGE - DETERMINISTIC PUZZLE BASED ON WEEK
 // ============================
 
 export async function fetchWeeklyChallenge(
+  category: Category = 'animals',
   size: number,
   difficulty: string = 'easy'
 ): Promise<PuzzleResponse | null> {
-  console.log('📆 fetchWeeklyChallenge - Called with:', { size, difficulty });
+  console.log('📆 fetchWeeklyChallenge - Called with:', { category, size, difficulty });
   try {
     const difficultyFolder = getDifficultyFolder(difficulty);
+    const categoryFolder = getCategoryFolder(category);
     
-    const indexUrl = `${BASE_URL}/${size}/${difficultyFolder}/index.json`;
+    const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
     console.log('📆 Loading weekly index from:', indexUrl);
     
     const index = await loadJson<any>(indexUrl);
     const files = index.files;
+    
+    // Handle both string[] and object[] formats
+    const fileEntries = files.map((f: any) => typeof f === 'string' ? { file: f } : f);
 
-    // Calculate week number
     const now = new Date();
     const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
     const pastDaysOfYear = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
@@ -230,68 +310,79 @@ export async function fetchWeeklyChallenge(
     
     console.log('📆 Week number:', weekNumber);
 
-    // Pick file deterministically
-    const fileIndex = weekNumber % files.length;
-    const file = files[fileIndex].file;
-    console.log(`📆 Selected file ${fileIndex + 1}/${files.length}:`, file);
+    const fileIndex = weekNumber % fileEntries.length;
+    const file = fileEntries[fileIndex].file;
+    console.log(`📆 Selected file ${fileIndex + 1}/${fileEntries.length}:`, file);
 
-    // Load puzzles from file
-    const fileUrl = `${BASE_URL}/${size}/${difficultyFolder}/${file}`;
+    const fileUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/${file}`;
     const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
 
-    // Pick first puzzle for weekly
+    // Use first puzzle of the file for weekly consistency
     const puzzle = puzzles[0];
     console.log('✅ Weekly puzzle loaded');
     
-    return puzzle;
+    return { ...puzzle, category };
   } catch (err) {
     console.error('❌ Weekly fetch failed:', err);
-    
-    // Fallback to sequential if weekly fails
-    console.log('📆 Falling back to sequential puzzle');
-    return fetchSequentialPuzzle(size, difficulty);
-  }
-}
-
-// ============================
-// 4️⃣ ANIMAL FACTS
-// ============================
-
-export async function fetchAnimalFacts(): Promise<Fact[] | null> {
-  try {
-    const url = `${BASE_URL}/facts/animals_fact.json`;
-    console.log('📚 Fetching animal facts from:', url);
-    return await loadJson<Fact[]>(url);
-  } catch (err) {
-    console.error('❌ Facts fetch failed:', err);
     return null;
   }
 }
 
 // ============================
-// 5️⃣ DAILY FACT ROTATION
+// 4️⃣ CATEGORY FACTS
 // ============================
 
-export async function fetchDailyAnimalFact(): Promise<string | null> {
+export async function fetchCategoryFacts(category: Category): Promise<CategoryFact[] | null> {
   try {
-    const storageKey = '@daily_animal_fact_index';
+    const categoryFolder = getCategoryFolder(category);
+    
+    // Correct URL pattern based on your repo structure: /{category}/facts/{category}_fact.json
+    const url = `${BASE_URL}/${categoryFolder}/facts/${categoryFolder}_fact.json`;
+    console.log(`📚 Fetching ${category} facts from:`, url);
+    
+    const data = await loadJson<CategoryFact[]>(url);
+    if (data && data.length > 0) {
+      console.log(`✅ Found ${data.length} fact items for ${category}`);
+      return data;
+    }
+    
+    console.log(`⚠️ No facts found for ${category}`);
+    return null;
+    
+  } catch (err) {
+    console.error(`❌ ${category} facts fetch failed:`, err);
+    return null;
+  }
+}
+
+// ============================
+// 5️⃣ DAILY CATEGORY FACT ROTATION
+// ============================
+
+export async function fetchDailyCategoryFact(category: Category = 'animals'): Promise<string | null> {
+  try {
+    const storageKey = `@daily_${category}_fact_index`;
     const stored = await AsyncStorage.getItem(storageKey);
 
     let currentIndex = stored
       ? JSON.parse(stored)
-      : { animalIdx: 0, factIdx: 0 };
+      : { itemIdx: 0, factIdx: 0 };
 
-    const animals = await fetchAnimalFacts();
-    if (!animals) return null;
+    const facts = await fetchCategoryFacts(category);
+    
+    if (!facts || facts.length === 0) {
+      console.log(`⚠️ No facts available for ${category}, using fallback`);
+      const emoji = getCategoryEmoji(category);
+      return `${emoji} Discover amazing ${getCategoryDisplayName(category).toLowerCase()} facts every day!`;
+    }
 
-    const animal = animals[currentIndex.animalIdx % animals.length];
-    const fact =
-      animal.facts[currentIndex.factIdx % animal.facts.length];
+    const factItem = facts[currentIndex.itemIdx % facts.length];
+    const fact = factItem.facts[currentIndex.factIdx % factItem.facts.length];
 
     // Update index for next time
-    currentIndex.animalIdx++;
-    if (currentIndex.animalIdx >= animals.length) {
-      currentIndex.animalIdx = 0;
+    currentIndex.itemIdx++;
+    if (currentIndex.itemIdx >= facts.length) {
+      currentIndex.itemIdx = 0;
       currentIndex.factIdx++;
     }
 
@@ -300,12 +391,133 @@ export async function fetchDailyAnimalFact(): Promise<string | null> {
       JSON.stringify(currentIndex)
     );
 
-    const factString = `${animal.name}: ${fact}`;
-    console.log('📚 Daily fact:', factString);
+    // Format the fact with emoji and category name
+    const emoji = getCategoryEmoji(category);
+    const factString = `${emoji} ${factItem.name}: ${fact}`;
+    console.log(`📚 Daily ${category} fact:`, factString.substring(0, 100) + '...');
     
     return factString;
   } catch (err) {
-    console.error('❌ Daily fact failed:', err);
-    return null;
+    console.error(`❌ Daily ${category} fact failed:`, err);
+    const emoji = getCategoryEmoji(category);
+    return `${emoji} Discover amazing ${getCategoryDisplayName(category).toLowerCase()} facts every day!`;
   }
+}
+
+// ============================
+// 6️⃣ CHECK IF CATEGORY EXISTS FOR A GIVEN SIZE/DIFFICULTY
+// ============================
+
+export async function checkCategoryExists(
+  category: Category, 
+  size: number, 
+  difficulty: string
+): Promise<boolean> {
+  try {
+    const difficultyFolder = getDifficultyFolder(difficulty);
+    const categoryFolder = getCategoryFolder(category);
+    
+    const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
+    await loadJson<any>(indexUrl);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ============================
+// 7️⃣ GET AVAILABLE SIZES FOR CATEGORY AND DIFFICULTY
+// ============================
+
+export async function getAvailableSizes(
+  category: Category, 
+  difficulty: string
+): Promise<number[]> {
+  try {
+    const difficultyFolder = getDifficultyFolder(difficulty);
+    const categoryFolder = getCategoryFolder(category);
+    
+    // Common puzzle sizes - adjust based on your actual data
+    const sizes = [5, 6, 7, 8, 9, 10, 11, 12, 16];
+    const availableSizes: number[] = [];
+    
+    for (const size of sizes) {
+      try {
+        const url = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
+        await loadJson<any>(url);
+        availableSizes.push(size);
+      } catch {
+        // Size not available, skip
+      }
+    }
+    
+    return availableSizes;
+  } catch {
+    return [];
+  }
+}
+
+// ============================
+// 8️⃣ GET AVAILABLE DIFFICULTIES FOR CATEGORY AND SIZE
+// ============================
+
+export async function getAvailableDifficulties(
+  category: Category,
+  size: number
+): Promise<string[]> {
+  const difficulties = ['easy', 'medium', 'hard', 'expert'];
+  const available: string[] = [];
+  
+  for (const difficulty of difficulties) {
+    const exists = await checkCategoryExists(category, size, difficulty);
+    if (exists) {
+      available.push(difficulty);
+    }
+  }
+  
+  return available;
+}
+
+// ============================
+// 9️⃣ GET RANDOM CATEGORY
+// ============================
+
+export function getRandomCategory(): Category {
+  const categories = getAllCategories();
+  const randomIndex = Math.floor(Math.random() * categories.length);
+  return categories[randomIndex];
+}
+
+// ============================
+// 🔟 VALIDATE CATEGORY
+// ============================
+
+export function isValidCategory(category: string): category is Category {
+  return getAllCategories().includes(category as Category);
+}
+
+// ============================
+// BACKWARD COMPATIBILITY
+// ============================
+
+/**
+ * @deprecated Use fetchDailyCategoryFact with category parameter instead
+ */
+export async function fetchDailyAnimalFact(): Promise<string | null> {
+  return fetchDailyCategoryFact('animals');
+}
+
+/**
+ * @deprecated Use fetchCategoryFacts with category parameter instead
+ */
+export async function fetchAnimalFacts(): Promise<Fact[] | null> {
+  const facts = await fetchCategoryFacts('animals');
+  if (!facts) return null;
+  
+  return facts.map((fact, index) => ({
+    id: index,
+    name: fact.name,
+    category: 'animals',
+    facts: fact.facts
+  }));
 }
