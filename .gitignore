@@ -142,8 +142,6 @@ web-build/
 expo-env.d.ts
 
 # Native (Android/iOS) - IMPORTANT: Exclude these from git
-android/
-ios/
 .kotlin/
 *.orig.*
 *.jks
@@ -166,3 +164,4 @@ yarn-error.*
 
 # local env files
 .env*.local
+node_modules
