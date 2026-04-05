@@ -4,6 +4,9 @@
       "eas": {
         "projectId": "1dcc3e03-540d-40eb-80bb-5c9052318d3a"
       }
+    },
+    "android": {
+      "package": "com.ckayssar1.sudokutiles"
     }
   }
 }

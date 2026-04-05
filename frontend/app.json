@@ -128,6 +128,14 @@
           "ios": {
             "useFrameworks": "static",
             "deploymentTarget": "15.1"
+          },
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0",
+            "minSdkVersion": 23,
+            "kotlinVersion": "1.9.24",
+            "gradleVersion": "8.3.0"
           }
         }
       ],
