@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "136934864636",
+    "project_id": "zootiles",
+    "storage_bucket": "zootiles.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:136934864636:android:0441085a1e854334538979",
+        "android_client_info": {
+          "package_name": "com.chamal.sudokutiles"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "136934864636-oho42r3tpskkvcunpatfur0cqoqmftqj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPFxp83_dEmXMCKU6X0RY84GnuZgCxbnA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "136934864636-oho42r3tpskkvcunpatfur0cqoqmftqj.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "136934864636-43ektognl9thv2rva0l37k1s3joutd4m.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.chamal.sudokutiles"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
