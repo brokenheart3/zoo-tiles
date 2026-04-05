@@ -27,6 +27,30 @@
               "com.googleusercontent.apps.136934864636-43ektognl9thv2rva0l37k1s3joutd4m"
             ]
           }
+        ],
+        "LSApplicationQueriesSchemes": [
+          "whatsapp",
+          "tg",
+          "telegram",
+          "fb-messenger",
+          "fb",
+          "fbshareextension",
+          "twitter",
+          "twitterrific",
+          "tweetbot",
+          "instagram",
+          "instagram-stories",
+          "tiktok",
+          "snapchat",
+          "linkedin",
+          "linkedin-sdk2",
+          "linkedin-sdk",
+          "reddit",
+          "discord",
+          "sms",
+          "mailto",
+          "googlechrome",
+          "safari"
         ]
       }
     },
@@ -37,8 +61,57 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.ckayssar1.zootiles",
-      "googleServicesFile": "./google-services.json"
+      "package": "com.chamal.sudokutiles",
+      "googleServicesFile": "./google-services.json",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "*.whatsapp.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.telegram.org"
+            },
+            {
+              "scheme": "https",
+              "host": "*.fb.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.twitter.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.instagram.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.tiktok.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.snapchat.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.linkedin.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.reddit.com"
+            },
+            {
+              "scheme": "https",
+              "host": "*.discord.com"
+            }
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

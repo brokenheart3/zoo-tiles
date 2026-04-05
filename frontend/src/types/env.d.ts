@@ -21,4 +21,5 @@ declare module '@env' {
   export const PROJECT_ID_IOS: string;
   export const STORAGE_BUCKET_IOS: string;
   export const MESSAGING_SENDER_ID_IOS: string;
+  export const GITHUB_TOKEN: string;  // Added GitHub token
 }

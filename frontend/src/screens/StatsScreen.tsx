@@ -1,4 +1,4 @@
-// screens/StatsScreen.tsx
+// src/screens/StatsScreen.tsx
 import React, { useState, useEffect, useContext } from 'react';
 import {
   ScrollView,
@@ -141,7 +141,6 @@ const StatsScreen = () => {
       return;
     }
 
-    // Cast profile.stats to any to access new fields
     const p = profile.stats as any;
     
     console.log('📊 StatsScreen - Loading stats:', p);
@@ -150,7 +149,6 @@ const StatsScreen = () => {
     const weeklyScore = Math.min((p.weeklyChallengesCompleted || 0) * 50, 500);
     const longestStreak = p.longestStreak || p.currentStreak || 0;
     const totalPlayTime = p.totalPlayTime || 0;
-    const bestTimeFormatted = p.bestTime === Infinity ? '--:--' : formatTime(p.bestTime || 0);
     
     setStats({
       puzzlesCompleted: p.puzzlesSolved ?? 0,
@@ -172,7 +170,7 @@ const StatsScreen = () => {
       totalCorrectMoves: p.totalCorrectMoves ?? 0,
       totalWrongMoves: p.totalWrongMoves ?? 0,
       
-      // Position stats - accessed via 'as any'
+      // Position stats
       firstPlaceWins: p.firstPlaceWins ?? 0,
       secondPlaceWins: p.secondPlaceWins ?? 0,
       thirdPlaceWins: p.thirdPlaceWins ?? 0,
@@ -199,7 +197,6 @@ const StatsScreen = () => {
       let progress = 0;
       let maxProgress = t.requirement.value;
       
-      // Determine category based on trophy ID
       let category: 'common' | 'rare' | 'epic' | 'legendary' | 'position' = 'common';
       
       if (t.id.includes('first_place') || 
@@ -213,10 +210,8 @@ const StatsScreen = () => {
       if (t.unlocked) {
         progress = maxProgress;
       } else {
-        // Get the requirement type as string
         const reqType = t.requirement.type as string;
         
-        // Handle each requirement type
         if (reqType === 'puzzles_completed') {
           progress = stats.puzzlesSolved || 0;
         } else if (reqType === 'daily_challenges') {
@@ -308,6 +303,12 @@ const StatsScreen = () => {
   const unlockedAchievements = achievements.filter(a => a.unlocked).length;
   const totalAchievements = achievements.length;
   const filteredAchievements = filterAchievements();
+
+  // Calculate podium percentages
+  const totalWins = stats.firstPlaceWins + stats.secondPlaceWins + stats.thirdPlaceWins;
+  const firstPlacePercent = totalWins > 0 ? (stats.firstPlaceWins / totalWins) * 100 : 0;
+  const secondPlacePercent = totalWins > 0 ? (stats.secondPlaceWins / totalWins) * 100 : 0;
+  const thirdPlacePercent = totalWins > 0 ? (stats.thirdPlaceWins / totalWins) * 100 : 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -407,37 +408,98 @@ const StatsScreen = () => {
               </StatsGrid>
             </StatSection>
 
-            {/* Top Finishes Section */}
+            {/* Top Finishes Section - Enhanced */}
             <StatSection title="🥇 Top Finishes" textColor={colors.text}>
               <View style={[styles.positionContainer, { backgroundColor: colors.button }]}>
-                <View style={styles.positionRow}>
-                  <View style={styles.positionItem}>
-                    <Text style={styles.positionEmoji}>🥇</Text>
-                    <Text style={[styles.positionNumber, { color: colors.text }]}>{stats.firstPlaceWins}</Text>
-                    <Text style={[styles.positionLabel, { color: colors.text }]}>1st Place</Text>
-                  </View>
-                  <View style={styles.positionItem}>
-                    <Text style={styles.positionEmoji}>🥈</Text>
-                    <Text style={[styles.positionNumber, { color: colors.text }]}>{stats.secondPlaceWins}</Text>
-                    <Text style={[styles.positionLabel, { color: colors.text }]}>2nd Place</Text>
-                  </View>
-                  <View style={styles.positionItem}>
-                    <Text style={styles.positionEmoji}>🥉</Text>
-                    <Text style={[styles.positionNumber, { color: colors.text }]}>{stats.thirdPlaceWins}</Text>
-                    <Text style={[styles.positionLabel, { color: colors.text }]}>3rd Place</Text>
+                {/* Main Podium Display */}
+                <View style={styles.podiumContainer}>
+                  <View style={styles.podiumRow}>
+                    {/* 2nd Place */}
+                    <View style={[styles.podiumItem, styles.podiumSecond]}>
+                      <Text style={styles.podiumEmoji}>🥈</Text>
+                      <Text style={[styles.podiumNumber, { color: colors.text }]}>{stats.secondPlaceWins}</Text>
+                      <Text style={[styles.podiumLabel, { color: colors.text }]}>2nd Place</Text>
+                      <View style={[styles.podiumBar, { height: Math.min(80, secondPlacePercent / 2), backgroundColor: '#C0C0C0' }]} />
+                    </View>
+                    
+                    {/* 1st Place (Highlighted) */}
+                    <View style={[styles.podiumItem, styles.podiumFirst]}>
+                      <Text style={styles.podiumEmoji}>🥇</Text>
+                      <Text style={[styles.podiumNumber, { color: colors.text, fontSize: 32 }]}>{stats.firstPlaceWins}</Text>
+                      <Text style={[styles.podiumLabel, { color: colors.text }]}>1st Place</Text>
+                      <View style={[styles.podiumBar, { height: Math.min(120, firstPlacePercent), backgroundColor: '#FFD700' }]} />
+                    </View>
+                    
+                    {/* 3rd Place */}
+                    <View style={[styles.podiumItem, styles.podiumThird]}>
+                      <Text style={styles.podiumEmoji}>🥉</Text>
+                      <Text style={[styles.podiumNumber, { color: colors.text }]}>{stats.thirdPlaceWins}</Text>
+                      <Text style={[styles.podiumLabel, { color: colors.text }]}>3rd Place</Text>
+                      <View style={[styles.podiumBar, { height: Math.min(60, thirdPlacePercent / 2), backgroundColor: '#CD7F32' }]} />
+                    </View>
                   </View>
                 </View>
+
+                {/* Total Wins Badge */}
+                {totalWins > 0 && (
+                  <View style={styles.totalWinsBadge}>
+                    <Text style={styles.totalWinsEmoji}>🏆</Text>
+                    <Text style={[styles.totalWinsText, { color: colors.text }]}>
+                      Total Podium Finishes: {totalWins}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Separator */}
                 <View style={styles.positionDivider} />
-                <View style={styles.challengePositionRow}>
-                  <View style={styles.challengePositionItem}>
-                    <Text style={[styles.challengePositionLabel, { color: colors.text }]}>Daily 1st:</Text>
-                    <Text style={[styles.challengePositionValue, { color: colors.text }]}>{stats.dailyFirstPlace}</Text>
+
+                {/* Detailed Breakdown by Challenge Type */}
+                <Text style={[styles.breakdownTitle, { color: colors.text }]}>Breakdown by Challenge</Text>
+                
+                <View style={styles.challengeBreakdown}>
+                  {/* Daily Challenge Positions */}
+                  <View style={styles.breakdownColumn}>
+                    <Text style={[styles.breakdownHeader, { color: colors.text }]}>📅 Daily</Text>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownEmoji}>🥇</Text>
+                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailyFirstPlace}</Text>
+                    </View>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownEmoji}>🥈</Text>
+                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailySecondPlace}</Text>
+                    </View>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownEmoji}>🥉</Text>
+                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailyThirdPlace}</Text>
+                    </View>
                   </View>
-                  <View style={styles.challengePositionItem}>
-                    <Text style={[styles.challengePositionLabel, { color: colors.text }]}>Weekly 1st:</Text>
-                    <Text style={[styles.challengePositionValue, { color: colors.text }]}>{stats.weeklyFirstPlace}</Text>
+
+                  {/* Weekly Challenge Positions */}
+                  <View style={styles.breakdownColumn}>
+                    <Text style={[styles.breakdownHeader, { color: colors.text }]}>📆 Weekly</Text>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownEmoji}>🥇</Text>
+                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklyFirstPlace}</Text>
+                    </View>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownEmoji}>🥈</Text>
+                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklySecondPlace}</Text>
+                    </View>
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownEmoji}>🥉</Text>
+                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklyThirdPlace}</Text>
+                    </View>
                   </View>
                 </View>
+
+                {/* Achievement Progress Tips */}
+                {stats.firstPlaceWins < 5 && (
+                  <View style={styles.tipContainer}>
+                    <Text style={[styles.tipText, { color: colors.text, opacity: 0.7 }]}>
+                      💡 Tip: Complete {5 - stats.firstPlaceWins} more 1st place finishes to unlock the "Rising Champion" achievement!
+                    </Text>
+                  </View>
+                )}
               </View>
             </StatSection>
 
@@ -704,54 +766,119 @@ const styles = StyleSheet.create({
   contentContainer: {
     paddingHorizontal: 20,
   },
-  // Position styles
+  // Enhanced Position styles
   positionContainer: {
     borderRadius: 12,
     padding: 16,
     marginTop: 8,
   },
-  positionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+  podiumContainer: {
     marginBottom: 16,
   },
-  positionItem: {
-    alignItems: 'center',
+  podiumRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    gap: 16,
   },
-  positionEmoji: {
-    fontSize: 32,
+  podiumItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  podiumFirst: {
+    transform: [{ scale: 1.05 }],
+  },
+  podiumSecond: {
+    opacity: 0.9,
+  },
+  podiumThird: {
+    opacity: 0.85,
+  },
+  podiumEmoji: {
+    fontSize: 36,
     marginBottom: 4,
   },
-  positionNumber: {
-    fontSize: 24,
+  podiumNumber: {
+    fontSize: 28,
     fontWeight: 'bold',
     marginBottom: 2,
   },
-  positionLabel: {
+  podiumLabel: {
     fontSize: 12,
     opacity: 0.8,
+    marginBottom: 8,
+  },
+  podiumBar: {
+    width: 40,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  totalWinsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    marginBottom: 12,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  totalWinsEmoji: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  totalWinsText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   positionDivider: {
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.2)',
     marginVertical: 12,
   },
-  challengePositionRow: {
+  breakdownTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  challengeBreakdown: {
     flexDirection: 'row',
     justifyContent: 'space-around',
+    marginBottom: 12,
   },
-  challengePositionItem: {
+  breakdownColumn: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  breakdownHeader: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    opacity: 0.9,
+  },
+  breakdownRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 4,
   },
-  challengePositionLabel: {
-    fontSize: 14,
-    marginRight: 6,
-    opacity: 0.8,
+  breakdownEmoji: {
+    fontSize: 18,
+    marginRight: 8,
   },
-  challengePositionValue: {
+  breakdownValue: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
+  },
+  tipContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  tipText: {
+    fontSize: 12,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   // Achievement tab styles
   achievementTabContainer: {

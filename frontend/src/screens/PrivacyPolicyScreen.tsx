@@ -15,7 +15,7 @@ const PrivacyPolicyScreen = () => {
   const privacySections = [
     {
       title: "Information We Collect",
-      content: "Zoo-Tiles collects minimal data to provide and improve the game experience. This includes:",
+      content: "Sudoku Tiles Pro collects minimal data to provide and improve the game experience. This includes:",
       points: [
         "Game progress and statistics (puzzles solved, accuracy, streaks)",
         "App usage data for improving features",
@@ -43,7 +43,7 @@ const PrivacyPolicyScreen = () => {
     },
     {
       title: "Third-Party Services",
-      content: "Zoo-Tiles uses these third-party services:",
+      content: "Sudoku Tiles Pro uses these third-party services:",
       points: [
         "Google Play Services (Android only)",
         "Apple Game Center (iOS only)",
@@ -63,7 +63,7 @@ const PrivacyPolicyScreen = () => {
     },
     {
       title: "Children's Privacy",
-      content: "Zoo-Tiles is suitable for all ages:",
+      content: "Sudoku Tiles Pro is suitable for all ages:",
       points: [
         "We do not knowingly collect personal information from children under 13",
         "Parental guidance is recommended for young users",
@@ -83,7 +83,7 @@ const PrivacyPolicyScreen = () => {
       title: "Contact Us",
       content: "For privacy-related questions:",
       points: [
-        "Email: privacy@zootiles.com",
+        "Email: sudokutiles1@gmail.com",
         "Response time: 3-5 business days",
         "We take all privacy concerns seriously"
       ]
@@ -98,14 +98,14 @@ const PrivacyPolicyScreen = () => {
         
         <View style={[styles.introCard, { backgroundColor: colors.button }]}>
           <Text style={[styles.introText, { color: colors.text }]}>
-            Your privacy is important to us. Zoo-Tiles is designed with privacy in mind.
+            Your privacy is important to us. Sudoku Tiles Pro is designed with privacy in mind.
             This document explains how we handle your information.
           </Text>
         </View>
 
         <Text style={[styles.summaryTitle, { color: colors.text }]}>Summary</Text>
         <Text style={[styles.summaryText, { color: colors.text }]}>
-          Zoo-Tiles does not collect personal data without your consent. 
+          Sudoku Tiles Pro does not collect personal data without your consent. 
           All game progress is stored locally or optionally synced to your account. 
           We never sell or share your information with third parties. 
           By using this app, you consent to the collection of anonymous usage statistics to improve the game experience.
@@ -142,15 +142,15 @@ const PrivacyPolicyScreen = () => {
         <View style={[styles.importantCard, { backgroundColor: `${colors.button}30` }]}>
           <Text style={[styles.importantTitle, { color: colors.text }]}>Important Notice</Text>
           <Text style={[styles.importantText, { color: colors.text }]}>
-            By using Zoo-Tiles, you agree to this Privacy Policy. 
+            By using Sudoku Tiles Pro, you agree to this Privacy Policy. 
             If you do not agree with any part of this policy, please discontinue use of the app. 
-            For questions or concerns, contact us at privacy@zootiles.com.
+            For questions or concerns, contact us at sudokutiles1@gmail.com.
           </Text>
         </View>
 
         <View style={[styles.versionInfo, { backgroundColor: colors.button }]}>
           <Text style={[styles.versionText, { color: colors.text }]}>
-            Zoo-Tiles Privacy Policy v1.0
+            Sudoku Tiles Pro Privacy Policy v1.0
           </Text>
           <Text style={[styles.effectiveText, { color: colors.text }]}>
             Effective Date: January 1, 2024

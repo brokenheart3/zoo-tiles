@@ -1,170 +1,258 @@
 import express from "express";
 import axios from "axios";
 import cors from "cors";
+import { config } from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// Get current directory
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables
+const envPath = path.join(__dirname, "..", ".env");
+config({ path: envPath });
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// =========================
-// Types
-// =========================
-interface Puzzle {
-  id: number;
-  date?: string;
-  start_date?: string;
-  end_date?: string;
-  size: number;
-  difficulty: string;
-  category: string;
-  contents: string[];
-  puzzle: string[][];
-  solution: string[][];
-}
-
-interface AnimalFact {
-  id: number;
-  name: string;
-  category: string;
-  facts: string[];
-}
+// Debug middleware
+app.use((req, res, next) => {
+  console.log(`📥 ${req.method} ${req.url}`);
+  next();
+});
 
 // =========================
-// Helper to fetch JSON
+// GitHub Token
+// =========================
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_RAW_URL = "https://raw.githubusercontent.com/brokenheart3/sudoAPI/main";
+
+console.log("🔐 GitHub Token configured:", GITHUB_TOKEN ? "Yes ✅" : "No ❌");
+console.log("📡 Using GitHub Raw URL:", GITHUB_RAW_URL);
+
+// =========================
+// Helper to fetch JSON with token
 // =========================
 async function fetchJson<T>(url: string): Promise<T | null> {
+  console.log(`🌐 Fetching URL: ${url}`);
   try {
-    const resp = await axios.get<T>(url);
+    const headers: any = { "Accept": "application/json" };
+    if (GITHUB_TOKEN) {
+      headers["Authorization"] = `token ${GITHUB_TOKEN}`;
+      console.log(`🔑 Using token: ${GITHUB_TOKEN.substring(0, 10)}...`);
+    }
+    const resp = await axios.get<T>(url, { headers });
+    console.log(`✅ Success! Status: ${resp.status}, Data length: ${JSON.stringify(resp.data).length}`);
     return resp.data;
-  } catch (err) {
-    console.error(`Failed to fetch: ${url}`, err);
+  } catch (err: any) {
+    console.error(`❌ Failed to fetch: ${url}`);
+    console.error(`   Status: ${err?.response?.status}`);
+    console.error(`   Message: ${err?.message}`);
+    if (err?.response?.status === 404) {
+      console.error(`   File not found! Check if the path is correct.`);
+    }
+    if (err?.response?.status === 401) {
+      console.error(`   Unauthorized! Check your GitHub token.`);
+    }
     return null;
   }
 }
 
 // =========================
-// ----------------- Puzzle Logic -----------------
+// Test route to check GitHub access
 // =========================
-
-// Get random puzzle from size & difficulty using index.json
-async function getRandomPuzzle(size: string, difficulty: string): Promise<Puzzle | null> {
-  const base = `https://raw.githubusercontent.com/brokenheart3/sudoAPI/main/animals/${size}/${difficulty}`;
-
-  const indexUrl = `${base}/index.json`;
-  const index = await fetchJson<any>(indexUrl);
-  if (!index) return null;
-
-  const randomFile = index.files[Math.floor(Math.random() * index.files.length)].file;
-  const fileUrl = `${base}/${randomFile}`;
-
-  const puzzles = await fetchJson<Puzzle[]>(fileUrl);
-  if (!puzzles || puzzles.length === 0) return null;
-
-  return puzzles[Math.floor(Math.random() * puzzles.length)];
-}
-
-// ----------------- Normal Play -----------------
-app.get("/animals/:size/puzzles", async (req, res) => {
-  const { size } = req.params;
-  const { difficulty } = req.query as { difficulty: string };
-
-  if (!difficulty) {
-    return res.status(400).json({ error: "Difficulty is required" });
+app.get("/test-github", async (req, res) => {
+  console.log("🧪 Testing GitHub access...");
+  
+  // Test with a known good file (if your repo has animals/5/easy/easy_5_1.json)
+  const testUrl = `${GITHUB_RAW_URL}/animals/5/easy/easy_5_1.json`;
+  const result = await fetchJson<any>(testUrl);
+  
+  if (result) {
+    res.json({ success: true, message: "GitHub access working!", data: result });
+  } else {
+    res.json({ success: false, message: "GitHub access failed. Check token and file paths." });
   }
+});
 
-  const puzzle = await getRandomPuzzle(size, difficulty);
-  if (!puzzle) {
-    return res.status(500).json({ error: "Could not fetch puzzle" });
+// =========================
+// SIMPLE TEST ROUTES
+// =========================
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", message: "Server is running!" });
+});
+
+app.get("/test", (req, res) => {
+  res.json({ message: "Test endpoint works!" });
+});
+
+// =========================
+// Get Random Puzzle - WITH DEBUGGING
+// =========================
+app.get("/puzzle/:category/:size/:difficulty", async (req, res) => {
+  const { category, size, difficulty } = req.params;
+  console.log(`\n🎮 Puzzle endpoint called with: category=${category}, size=${size}, difficulty=${difficulty}`);
+  
+  try {
+    const sizeNum = parseInt(size);
+    const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const randomFileNum = fileNumbers[Math.floor(Math.random() * fileNumbers.length)];
+    
+    // Construct the URL exactly as it should be
+    const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${randomFileNum}.json`;
+    console.log(`📂 Attempting to fetch: ${url}`);
+    
+    const puzzles = await fetchJson<any[]>(url);
+    
+    if (puzzles && puzzles.length > 0) {
+      const randomIndex = Math.floor(Math.random() * puzzles.length);
+      console.log(`✅ Found puzzle! Returning index ${randomIndex}`);
+      res.json({ ...puzzles[randomIndex], category });
+    } else {
+      console.log(`❌ No puzzles found in file`);
+      res.status(404).json({ 
+        error: "No puzzle found",
+        attempted_url: url,
+        category,
+        size,
+        difficulty
+      });
+    }
+  } catch (error) {
+    console.error("Error in puzzle endpoint:", error);
+    res.status(500).json({ error: "Server error" });
   }
-
-  res.json(puzzle);
-});
-
-// ----------------- Daily Challenge -----------------
-app.get("/animals/:size/daily", async (req, res) => {
-  const { size } = req.params;
-  const url = `https://raw.githubusercontent.com/brokenheart3/sudoAPI/main/animals/${size}/daily_${size}.json`;
-
-  const dailyData = await fetchJson<Puzzle[]>(url);
-  if (!dailyData) return res.status(500).json({ error: "Failed to fetch daily puzzles" });
-
-  const today = new Date().toISOString().split("T")[0];
-  const todayPuzzle = dailyData.find((p) => p.date === today);
-
-  res.json(todayPuzzle || dailyData[0]);
-});
-
-// ----------------- Weekly Challenge -----------------
-app.get("/animals/:size/weekly", async (req, res) => {
-  const { size } = req.params;
-  const url = `https://raw.githubusercontent.com/brokenheart3/sudoAPI/main/animals/${size}/weekly_${size}.json`;
-
-  const weeklyData = await fetchJson<Puzzle[]>(url);
-  if (!weeklyData) return res.status(500).json({ error: "Failed to fetch weekly puzzles" });
-
-  const today = new Date();
-  const weeklyPuzzle = weeklyData.find(
-    (p) => p.start_date && p.end_date && new Date(p.start_date) <= today && today <= new Date(p.end_date)
-  );
-
-  res.json(weeklyPuzzle || weeklyData[0]);
 });
 
 // =========================
-// ----------------- Animal Facts Logic -----------------
+// Daily Challenge - WITH DEBUGGING
 // =========================
+app.get("/daily/:category/:size", async (req, res) => {
+  const { category, size } = req.params;
+  console.log(`\n📅 Daily endpoint called with: category=${category}, size=${size}`);
+  
+  try {
+    const sizeNum = parseInt(size);
+    const difficulty = "easy";
+    const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    
+    const now = new Date();
+    const start = new Date(now.getFullYear(), 0, 0);
+    const dayOfYear = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const fileNum = fileNumbers[dayOfYear % fileNumbers.length];
+    
+    const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${fileNum}.json`;
+    console.log(`📂 Attempting to fetch daily: ${url}`);
+    
+    const puzzles = await fetchJson<any[]>(url);
+    
+    if (puzzles && puzzles.length > 0) {
+      const puzzleIndex = dayOfYear % puzzles.length;
+      console.log(`✅ Found daily puzzle! Returning index ${puzzleIndex}`);
+      res.json({ ...puzzles[puzzleIndex], category });
+    } else {
+      console.log(`❌ No daily puzzles found`);
+      res.status(404).json({ 
+        error: "No daily puzzle found",
+        attempted_url: url,
+        category,
+        size
+      });
+    }
+  } catch (error) {
+    console.error("Error in daily endpoint:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
-// Cache facts for performance
-let animalFactsCache: AnimalFact[] | null = null;
-async function loadAnimalFacts(): Promise<AnimalFact[]> {
-  if (animalFactsCache) return animalFactsCache;
+// =========================
+// Weekly Challenge - WITH DEBUGGING
+// =========================
+app.get("/weekly/:category/:size", async (req, res) => {
+  const { category, size } = req.params;
+  console.log(`\n📆 Weekly endpoint called with: category=${category}, size=${size}`);
+  
+  try {
+    const sizeNum = parseInt(size);
+    const difficulty = "easy";
+    const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    
+    const now = new Date();
+    const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
+    const pastDays = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
+    const weekNumber = Math.ceil((pastDays + firstDayOfYear.getDay() + 1) / 7);
+    const fileNum = fileNumbers[weekNumber % fileNumbers.length];
+    
+    const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${fileNum}.json`;
+    console.log(`📂 Attempting to fetch weekly: ${url}`);
+    
+    const puzzles = await fetchJson<any[]>(url);
+    
+    if (puzzles && puzzles.length > 0) {
+      console.log(`✅ Found weekly puzzle! Returning first puzzle`);
+      res.json({ ...puzzles[0], category });
+    } else {
+      console.log(`❌ No weekly puzzles found`);
+      res.status(404).json({ 
+        error: "No weekly puzzle found",
+        attempted_url: url,
+        category,
+        size
+      });
+    }
+  } catch (error) {
+    console.error("Error in weekly endpoint:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
-  const url =
-    "https://raw.githubusercontent.com/brokenheart3/sudoAPI/main/animals/facts/animals_fact.json";
-  animalFactsCache = await fetchJson<AnimalFact[]>(url) || [];
-  return animalFactsCache;
-}
-
-// In-memory user progress tracking (replace with DB for real users)
-const userProgress: Record<string, Record<number, number>> = {}; // userProgress[userId][animalId] = nextFactIndex
-
-// ----------------- Facts Endpoint -----------------
-app.get("/animals/facts", async (req, res) => {
-  const { animalId, userId } = req.query as { animalId: string; userId?: string };
-
-  if (!animalId) return res.status(400).json({ error: "animalId is required" });
-  if (!userId) return res.status(400).json({ error: "userId is required" });
-
-  const factsData = await loadAnimalFacts();
-  const animal = factsData.find((a) => a.id === parseInt(animalId));
-  if (!animal) return res.status(404).json({ error: "Animal not found" });
-
-  // Initialize user progress if first time
-  if (!userProgress[userId]) userProgress[userId] = {};
-  if (userProgress[userId][animal.id] == null) userProgress[userId][animal.id] = 0;
-
-  const index = userProgress[userId][animal.id];
-  const fact = animal.facts[index];
-
-  // Increment progress (loop if at end)
-  userProgress[userId][animal.id] = (index + 1) % animal.facts.length;
-
-  res.json({
-    animalId: animal.id,
-    animalName: animal.name,
-    factId: index,
-    fact,
-    totalFacts: animal.facts.length
-  });
+// =========================
+// Category Facts - WITH DEBUGGING
+// =========================
+app.get("/facts/:category", async (req, res) => {
+  const { category } = req.params;
+  console.log(`\n📚 Facts endpoint called with: category=${category}`);
+  
+  try {
+    const url = `${GITHUB_RAW_URL}/${category}/facts/${category}_fact.json`;
+    console.log(`📂 Attempting to fetch facts: ${url}`);
+    
+    const facts = await fetchJson<any[]>(url);
+    
+    if (facts && facts.length > 0) {
+      console.log(`✅ Found ${facts.length} facts for ${category}`);
+      res.json(facts);
+    } else {
+      console.log(`❌ No facts found for ${category}`);
+      res.status(404).json({ 
+        error: `No facts found for ${category}`,
+        attempted_url: url,
+        category
+      });
+    }
+  } catch (error) {
+    console.error("Error in facts endpoint:", error);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // =========================
 // Start Server
 // =========================
 app.listen(PORT, () => {
-  console.log(`Sudoku Tiles API running at http://localhost:${PORT}`);
+  console.log(`\n✅ Sudoku Tiles API running at http://localhost:${PORT}`);
+  console.log(`📡 GitHub Token: ${GITHUB_TOKEN ? "Yes ✅" : "No ❌"}`);
+  console.log(`\n📋 Available endpoints:`);
+  console.log(`   GET http://localhost:${PORT}/health`);
+  console.log(`   GET http://localhost:${PORT}/test`);
+  console.log(`   GET http://localhost:${PORT}/test-github (TEST GITHUB ACCESS)`);
+  console.log(`   GET http://localhost:${PORT}/puzzle/:category/:size/:difficulty`);
+  console.log(`   GET http://localhost:${PORT}/daily/:category/:size`);
+  console.log(`   GET http://localhost:${PORT}/weekly/:category/:size`);
+  console.log(`   GET http://localhost:${PORT}/facts/:category`);
 });
-
-

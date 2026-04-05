@@ -167,32 +167,18 @@ export const getNextMondayUTC = (): Date => {
 };
 
 /**
- * Get the current UTC date string (YYYY-MM-DD) - FIXED with debug logging
+ * Get the current UTC date string (YYYY-MM-DD)
  */
 export const getUTCDateString = (): string => {
   const now = new Date();
-  
-  // Debug log to see what's happening
-  console.log('🔍 getUTCDateString called:');
-  console.log('   Local time:', now.toString());
-  console.log('   Local hours:', now.getHours());
-  console.log('   UTC hours:', now.getUTCHours());
-  console.log('   UTC date:', now.getUTCDate());
-  console.log('   UTC month:', now.getUTCMonth() + 1);
-  console.log('   UTC year:', now.getUTCFullYear());
-  
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, '0');
   const day = String(now.getUTCDate()).padStart(2, '0');
-  
-  const result = `${year}-${month}-${day}`;
-  console.log('   Generated UTC date string:', result);
-  
-  return result;
+  return `${year}-${month}-${day}`;
 };
 
 /**
- * Get yesterday's UTC date string (YYYY-MM-DD) - useful for debugging
+ * Get yesterday's UTC date string (YYYY-MM-DD)
  */
 export const getYesterdayUTCDateString = (): string => {
   const now = new Date();
@@ -213,7 +199,7 @@ export const getYesterdayUTCDateString = (): string => {
 };
 
 /**
- * Get tomorrow's UTC date string (YYYY-MM-DD) - useful for debugging
+ * Get tomorrow's UTC date string (YYYY-MM-DD)
  */
 export const getTomorrowUTCDateString = (): string => {
   const now = new Date();
@@ -233,13 +219,8 @@ export const getTomorrowUTCDateString = (): string => {
   return `${year}-${month}-${day}`;
 };
 
-// =====================================================
-// NEW FUNCTIONS ADDED FOR MIDNIGHT CROSSOVER HANDLING
-// =====================================================
-
 /**
  * Get UTC date string for a specific timestamp
- * Useful for determining which challenge a game belongs to when crossing midnight
  */
 export const getUTCDateStringForTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -251,32 +232,12 @@ export const getUTCDateStringForTimestamp = (timestamp: number): string => {
 
 /**
  * Check if a challenge started before UTC midnight but finished after
- * Returns true if the game crosses the UTC midnight boundary
  */
 export const isChallengeCrossingMidnight = (startTime: number): boolean => {
   const startDate = getUTCDateStringForTimestamp(startTime);
   const nowDate = getUTCDateString();
   return startDate !== nowDate;
 };
-
-/**
- * Get the challenge ID for a game based on when it started
- * Use this when saving results to ensure they go to the correct day
- */
-export const getChallengeIdForGame = (startTime: number, challengeType: 'daily' | 'weekly'): string => {
-  if (challengeType === 'daily') {
-    return `daily-${getUTCDateStringForTimestamp(startTime)}`;
-  } else {
-    // For weekly challenges, use the week number of the start time
-    const date = new Date(startTime);
-    const weekNumber = getWeekNumber(date);
-    return `weekly-${weekNumber}`;
-  }
-};
-
-// =====================================================
-// END OF NEW FUNCTIONS
-// =====================================================
 
 /**
  * Format milliseconds into readable time string
@@ -380,7 +341,7 @@ export const isWeekend = (date: Date): boolean => {
 };
 
 /**
- * Debug function to check current UTC time - ENHANCED
+ * Debug function to check current UTC time
  */
 export const debugUTCTime = (): void => {
   const now = new Date();
@@ -404,6 +365,82 @@ export const debugUTCTime = (): void => {
   console.log('  =====================');
 };
 
+// =====================================================
+// CHALLENGE ID HELPER FUNCTIONS (NEW)
+// =====================================================
+
+/**
+ * Get daily challenge ID with category and grid size
+ * Format: daily-YYYY-MM-DD-category-gridSize
+ * Example: daily-2024-01-15-animals-8
+ */
+export const getDailyChallengeId = (category: string, gridSize: string): string => {
+  const date = getUTCDateString();
+  const sizeNumber = gridSize.replace('x', '');
+  return `daily-${date}-${category}-${sizeNumber}`;
+};
+
+/**
+ * Get weekly challenge ID with category and grid size
+ * Format: weekly-weekNumber-category-gridSize
+ * Example: weekly-3-animals-8
+ */
+export const getWeeklyChallengeId = (category: string, gridSize: string): string => {
+  const weekNumber = getWeekNumber(new Date());
+  const sizeNumber = gridSize.replace('x', '');
+  return `weekly-${weekNumber}-${category}-${sizeNumber}`;
+};
+
+/**
+ * Get challenge ID for a game based on when it started
+ * Use this when saving results to ensure they go to the correct day
+ */
+export const getChallengeIdForGame = (
+  startTime: number, 
+  challengeType: 'daily' | 'weekly',
+  category: string,
+  gridSize: string
+): string => {
+  const sizeNumber = gridSize.replace('x', '');
+  
+  if (challengeType === 'daily') {
+    const date = getUTCDateStringForTimestamp(startTime);
+    return `daily-${date}-${category}-${sizeNumber}`;
+  } else {
+    const date = new Date(startTime);
+    const weekNumber = getWeekNumber(date);
+    return `weekly-${weekNumber}-${category}-${sizeNumber}`;
+  }
+};
+
+/**
+ * Parse daily challenge ID to extract components
+ * Returns: { date, category, gridSize }
+ */
+export const parseDailyChallengeId = (challengeId: string): { date: string; category: string; gridSize: string } | null => {
+  const parts = challengeId.split('-');
+  if (parts[0] !== 'daily' || parts.length !== 5) return null;
+  return {
+    date: `${parts[1]}-${parts[2]}-${parts[3]}`,
+    category: parts[4],
+    gridSize: parts[5]
+  };
+};
+
+/**
+ * Parse weekly challenge ID to extract components
+ * Returns: { weekNumber, category, gridSize }
+ */
+export const parseWeeklyChallengeId = (challengeId: string): { weekNumber: string; category: string; gridSize: string } | null => {
+  const parts = challengeId.split('-');
+  if (parts[0] !== 'weekly' || parts.length !== 4) return null;
+  return {
+    weekNumber: parts[1],
+    category: parts[2],
+    gridSize: parts[3]
+  };
+};
+
 /**
  * Compare two UTC date strings to find which one matches your data
  */
@@ -412,6 +449,5 @@ export const findMatchingChallengeId = async (
 ): Promise<string | null> => {
   console.log('🔍 Trying to find matching challenge ID:');
   challengeIds.forEach(id => console.log('   -', id));
-  // This function would need to check your database
-  return challengeIds[0]; // Return the first one for now
+  return challengeIds[0];
 };

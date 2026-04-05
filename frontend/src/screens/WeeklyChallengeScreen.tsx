@@ -1,5 +1,5 @@
 // src/screens/WeeklyChallengeScreen.tsx
-import React, { useContext, useState, useEffect } from "react";
+import React, { useContext, useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,26 +8,26 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ActivityIndicator,
+  Alert,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { ThemeContext, themeStyles } from "../context/ThemeContext";
 import { useSettings } from "../context/SettingsContext";
 import { useProfile } from "../context/ProfileContext";
+import { useGameMode } from "../context/GameModeContext";
 import { getChallengePlayerCount } from "../services/simpleChallengeService";
 import { getUserChallengeResult, getPlayerRank } from "../services/userService";
+import { challengeService } from "../services/challengeService";
 import { 
   getTimeRemaining, 
-  getWeekNumber, 
-  formatDate, 
-  formatTime,
-  getUTCDateString,
   isWeeklyChallengeActive,
-  getWeekNumber as getWeekNumberUTC
+  getWeekNumber as getWeekNumberUTC,
+  formatTime,
 } from "../utils/timeUtils";
 import { auth } from "../services/firebase";
 import AppFooter from "../components/common/AppFooter";
-import ChallengeLeaderboard from "../components/challenges/ChallengeLeaderboard"; // Import leaderboard
+import ChallengeLeaderboard from "../components/challenges/ChallengeLeaderboard";
 
 type RootStackParamList = {
   Play: {
@@ -55,38 +55,25 @@ type RootStackParamList = {
 
 type WeeklyChallengeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Play'>;
 
-// Weekly challenge animals (rotates each week)
-const WEEKLY_ANIMALS = [
-  { emoji: '🦁', name: 'Lion' },
-  { emoji: '🐘', name: 'Elephant' },
-  { emoji: '🦒', name: 'Giraffe' },
-  { emoji: '🦓', name: 'Zebra' },
-  { emoji: '🐅', name: 'Tiger' },
-  { emoji: '🦍', name: 'Gorilla' },
-  { emoji: '🐊', name: 'Crocodile' },
-  { emoji: '🦏', name: 'Rhino' },
-  { emoji: '🐆', name: 'Leopard' },
-  { emoji: '🦛', name: 'Hippo' },
-];
-
-// Helper to get this week's animal
-const getWeekAnimal = () => {
-  const weekNum = parseInt(getWeekNumberUTC(new Date()));
-  const index = (weekNum - 1) % WEEKLY_ANIMALS.length;
-  return WEEKLY_ANIMALS[index];
-};
-
-// Helper to get rank display with ordinal suffix
 const getRankDisplay = (rank: number | null): string => {
   if (!rank) return '—';
   if (rank === 1) return '🥇 1st';
   if (rank === 2) return '🥈 2nd';
   if (rank === 3) return '🥉 3rd';
-  
   if (rank % 10 === 1 && rank % 100 !== 11) return `${rank}st`;
   if (rank % 10 === 2 && rank % 100 !== 12) return `${rank}nd`;
   if (rank % 10 === 3 && rank % 100 !== 13) return `${rank}rd`;
   return `${rank}th`;
+};
+
+const formatUTCDateTime = (): string => {
+  const now = new Date();
+  return now.toUTCString();
+};
+
+const formatLocalDateTime = (): string => {
+  const now = new Date();
+  return now.toLocaleString();
 };
 
 const WeeklyChallengeScreen = () => {
@@ -94,132 +81,127 @@ const WeeklyChallengeScreen = () => {
   const { theme } = useContext(ThemeContext);
   const { settings } = useSettings();
   const { profile } = useProfile();
+  const { weeklyCompletion, refreshChallengeStatus } = useGameMode();
   
   const colors = themeStyles[theme];
   
   const [loading, setLoading] = useState(true);
   const [playerCount, setPlayerCount] = useState(0);
-  const [hasPlayed, setHasPlayed] = useState(false);
-  const [challengeResult, setChallengeResult] = useState<any>(null);
-  const [attempts, setAttempts] = useState(0);
   const [userRank, setUserRank] = useState<number | null>(null);
-  const [showLeaderboard, setShowLeaderboard] = useState(false); // State for leaderboard toggle
+  const [forceUpdate, setForceUpdate] = useState(0);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [currentUTCTime, setCurrentUTCTime] = useState(formatUTCDateTime());
+  const [currentLocalTime, setCurrentLocalTime] = useState(formatLocalDateTime());
   
-  const weekAnimal = getWeekAnimal();
+  // State for challenge name
+  const [challengeName, setChallengeName] = useState('');
+  
+  const timeUpdateRef = React.useRef<number | null>(null);
+  
+  const selectedCategory = (settings as any).category || 'animals';
   const weekNumber = getWeekNumberUTC(new Date());
-  const challengeId = `weekly-${weekNumber}`;
+  const challengeId = `weekly-${weekNumber}-${selectedCategory}`;
   const challengeActive = isWeeklyChallengeActive();
+  const currentGridSize = settings.gridSize || '8x8';
 
-  useEffect(() => {
-    loadChallengeData();
-    const interval = setInterval(() => {
-      // Force re-render to update timer
-      setLoading(prev => prev);
-    }, 60000); // Update every minute
-    
-    return () => clearInterval(interval);
-  }, []);
+  // Use context for completion status
+  const hasPlayed = weeklyCompletion.completed;
+  const challengeResult = weeklyCompletion.result;
 
-  const loadChallengeData = async () => {
+  const timeRemaining = getTimeRemaining('weekly');
+  const isExpired = !challengeActive;
+  const isUrgent = !isExpired && (timeRemaining.includes('0d') || (timeRemaining.includes('1d') && !timeRemaining.includes('Expired')));
+
+  // Load challenge name from service
+  const loadChallengeName = async () => {
     try {
-      setLoading(true);
-      
-      // Get real player count from Firebase
-      const count = await getChallengePlayerCount('weekly');
-      setPlayerCount(count);
-      
-      // Check if current user has played
-      const user = auth.currentUser;
-      if (user) {
-        console.log(`👤 Checking weekly challenge for user: ${user.uid}`);
-        console.log(`📅 This Week's Challenge ID: ${challengeId}`);
-        console.log(`⏰ Challenge active: ${challengeActive}`);
-        
-        // Get this week's result
-        const result = await getUserChallengeResult(user.uid, challengeId);
-        
-        // Check if challenge is expired
-        const isExpired = !challengeActive;
-        
-        if (result && result.completed) {
-          console.log('✅ User has completed this week\'s challenge:', result);
-          setHasPlayed(true);
-          setChallengeResult(result);
-          setAttempts(result.attempts || 1);
-          
-          // Only get rank if challenge is still active
-          if (challengeActive) {
-            console.log('🎯 Getting rank for challenge:', challengeId);
-            console.log('🎯 User time:', result.bestTime || result.time);
-            
-            const rank = await getPlayerRank(challengeId, user.uid);
-            
-            console.log('🎯 Raw rank returned:', rank);
-            setUserRank(rank);
-            
-            console.log(`🏆 User rank: ${rank} out of ${count}`);
-          } else {
-            setUserRank(null);
-          }
-        } else {
-          console.log('❌ User has not completed this week\'s challenge');
-          
-          // If challenge is expired, check if they played last week
-          if (isExpired) {
-            console.log('📅 Challenge expired - checking last week\'s result...');
-            
-            // Get last week's week number
-            const lastWeekNumber = (parseInt(weekNumber) - 1).toString();
-            const lastWeekId = `weekly-${lastWeekNumber}`;
-            
-            console.log(`🔍 Checking last week: ${lastWeekId}`);
-            const lastWeekResult = await getUserChallengeResult(user.uid, lastWeekId);
-            
-            if (lastWeekResult && lastWeekResult.completed) {
-              console.log('✅ Found result from last week!');
-              setHasPlayed(true);
-              setChallengeResult(lastWeekResult);
-              setAttempts(lastWeekResult.attempts || 1);
-              // Don't set rank for expired challenge
-              setUserRank(null);
-            } else {
-              console.log('❌ No result from last week');
-              setHasPlayed(false);
-              setChallengeResult(null);
-              setUserRank(null);
-            }
-          } else {
-            setHasPlayed(false);
-            setChallengeResult(null);
-            setUserRank(null);
-          }
-        }
-      }
-      
+      const name = await challengeService.getCurrentChallengeName('weekly', currentGridSize);
+      setChallengeName(name);
+      console.log('📛 Weekly challenge name loaded:', name);
     } catch (error) {
-      console.error('Error loading challenge data:', error);
-    } finally {
-      setLoading(false);
+      console.error('Error loading challenge name:', error);
+      setChallengeName('Weekly Challenge');
     }
   };
 
-  const handleStartChallenge = () => {
-    const startTime = Date.now();
-    const startChallengeId = challengeId; // Current week number
+  // Update time every second
+  useEffect(() => {
+    const timeInterval = setInterval(() => {
+      setCurrentUTCTime(formatUTCDateTime());
+      setCurrentLocalTime(formatLocalDateTime());
+    }, 1000);
     
+    return () => clearInterval(timeInterval);
+  }, []);
+
+  // Load challenge data function
+  const loadChallengeData = useCallback(async () => {
+    try {
+      setLoading(true);
+      console.log('🔄 Loading weekly challenge data for ID:', challengeId);
+      
+      // Load challenge name first
+      await loadChallengeName();
+      
+      // Refresh status from context
+      await refreshChallengeStatus(selectedCategory);
+      
+      const count = await getChallengePlayerCount('weekly', selectedCategory);
+      setPlayerCount(count);
+      
+      const user = auth.currentUser;
+      if (user && hasPlayed && challengeActive) {
+        const rank = await getPlayerRank(challengeId, user.uid);
+        setUserRank(rank);
+        console.log('🏆 User weekly rank:', rank);
+      }
+    } catch (error) {
+      console.error('Error loading weekly challenge data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [challengeId, challengeActive, currentGridSize, selectedCategory, refreshChallengeStatus, hasPlayed]);
+
+  // Refresh on focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('📱 WeeklyChallengeScreen focused - refreshing data...');
+      loadChallengeData();
+      return () => {};
+    }, [loadChallengeData])
+  );
+
+  // Timer for force update
+  useEffect(() => {
+    loadChallengeData();
+    
+    timeUpdateRef.current = setInterval(() => {
+      setForceUpdate(prev => prev + 1);
+    }, 1000);
+    
+    return () => {
+      if (timeUpdateRef.current) {
+        clearInterval(timeUpdateRef.current);
+      }
+    };
+  }, []);
+
+  const handleStartChallenge = () => {
+    console.log('🎮 Starting weekly challenge - ID:', challengeId);
     navigation.navigate('Play', {
       gridSize: settings.gridSize || '8x8',
       difficulty: 'Expert',
       challengeType: 'weekly',
-      challengeId: startChallengeId,
-      startTime: startTime,
-      key: `weekly-${startChallengeId}-${startTime}`,
+      challengeId: challengeId,
+      startTime: Date.now(),
+      key: `weekly-${challengeId}-${Date.now()}`,
     });
   };
 
   const handleViewResults = () => {
+    console.log('📊 Viewing weekly challenge results');
     navigation.navigate('ChallengeResults', {
-      challengeId,
+      challengeId: challengeId,
       challengeType: 'weekly',
       time: challengeResult?.bestTime || challengeResult?.time,
       isPerfect: challengeResult?.isPerfect,
@@ -232,11 +214,6 @@ const WeeklyChallengeScreen = () => {
   };
 
   const handleButtonPress = () => {
-    if (!challengeActive) {
-      handleStartChallenge();
-      return;
-    }
-    
     if (hasPlayed) {
       handleViewResults();
     } else {
@@ -245,13 +222,36 @@ const WeeklyChallengeScreen = () => {
   };
 
   const getButtonText = () => {
-    if (!challengeActive) {
-      return 'NEW WEEKLY CHALLENGE AVAILABLE';
-    }
-    return hasPlayed ? 'VIEW RESULTS' : 'PLAY WEEKLY CHALLENGE';
+    if (hasPlayed) return 'VIEW RESULTS';
+    if (isExpired) return 'NEW WEEKLY CHALLENGE AVAILABLE';
+    return 'PLAY WEEKLY CHALLENGE';
   };
 
-  // Helper to get contrasting text color
+  const getButtonColor = () => {
+    if (hasPlayed) return '#9C27B0';
+    if (isExpired) return '#1565C0';
+    return '#1565C0';
+  };
+
+  const getBadgeColor = () => {
+    if (hasPlayed) return '#9C27B0';
+    if (isExpired) return '#666';
+    return '#1565C0';
+  };
+
+  const getBadgeText = () => {
+    if (hasPlayed) return 'COMPLETED ✓';
+    if (isExpired) return 'EXPIRED';
+    return 'WEEKLY SPECIAL';
+  };
+
+  const formatTimeDisplay = (seconds: number): string => {
+    if (!seconds) return '--:--';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const getContrastColor = (bgColor: string): string => {
     const hex = bgColor.replace('#', '');
     const r = parseInt(hex.substr(0, 2), 16);
@@ -261,190 +261,112 @@ const WeeklyChallengeScreen = () => {
     return luminance > 0.5 ? '#000000' : '#ffffff';
   };
 
-  // Format time helper
-  const formatTimeDisplay = (seconds: number): string => {
-    if (!seconds) return '--:--';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   if (loading) {
     return (
       <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.text} />
-        <Text style={[styles.loadingText, { color: colors.text }]}>
-          Loading weekly challenge...
-        </Text>
+        <ActivityIndicator size="large" color={colors.button} />
+        <Text style={[styles.loadingText, { color: colors.text }]}>Loading weekly challenge...</Text>
       </SafeAreaView>
     );
   }
 
-  const timeRemaining = getTimeRemaining('weekly');
-  const isExpired = timeRemaining.includes('Expired');
-  const isUrgent = timeRemaining.includes('0d') || timeRemaining.includes('1d') && !timeRemaining.includes('Expired');
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.button }]}>
-          <Text style={[styles.title, { color: getContrastColor(colors.button) }]}>
-            Weekly Challenge
-          </Text>
-          <Text style={[styles.subtitle, { color: getContrastColor(colors.button) }]}>
-            Week {weekNumber} • {weekAnimal.emoji} {weekAnimal.name}
-          </Text>
-          <Text style={[styles.utcNote, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
-            Resets Monday at UTC Midnight
-          </Text>
+          <Text style={[styles.title, { color: getContrastColor(colors.button) }]}>Weekly Challenge</Text>
+          
+          {/* Challenge Name Display */}
+          <View style={styles.challengeNameContainer}>
+            <Text style={[styles.challengeNameText, { color: getContrastColor(colors.button) }]}>
+              {challengeName || 'Loading...'}
+            </Text>
+          </View>
+          
+          {/* Local Date/Time */}
+          <View style={styles.timeContainer}>
+            <Text style={[styles.timeLabel, { color: getContrastColor(colors.button), opacity: 0.8 }]}>📍 Local Time</Text>
+            <Text style={[styles.timeValue, { color: getContrastColor(colors.button) }]}>{currentLocalTime}</Text>
+          </View>
+          
+          {/* UTC Date/Time */}
+          <View style={styles.timeContainer}>
+            <Text style={[styles.timeLabel, { color: getContrastColor(colors.button), opacity: 0.8 }]}>🌍 UTC Time</Text>
+            <Text style={[styles.timeValue, { color: getContrastColor(colors.button) }]}>{currentUTCTime}</Text>
+          </View>
         </View>
 
-        {/* Weekly Challenge Card */}
         <View style={[styles.challengeCard, { backgroundColor: colors.button }]}>
-          <View style={[styles.badge, { backgroundColor: isExpired ? '#666' : '#1565C0' }]}>
-            <Text style={styles.badgeText}>
-              {isExpired ? 'EXPIRED' : 'WEEKLY SPECIAL'}
-            </Text>
+          <View style={[styles.badge, { backgroundColor: getBadgeColor() }]}>
+            <Text style={styles.badgeText}>{getBadgeText()}</Text>
           </View>
           
           <View style={styles.challengeHeader}>
             <Text style={[styles.challengeTitle, { color: getContrastColor(colors.button) }]}>
-              Weekly {weekAnimal.name} Expedition
+              {challengeName || 'Weekly Challenge'}
             </Text>
-            <Text style={[styles.gridSizeBadge, { 
-              color: getContrastColor(colors.button),
-              backgroundColor: 'rgba(255,255,255,0.2)' 
-            }]}>
+            <Text style={[styles.gridSizeBadge, { color: getContrastColor(colors.button), backgroundColor: 'rgba(255,255,255,0.2)' }]}>
               {settings.gridSize || '8x8'}
             </Text>
           </View>
           
           <Text style={[styles.challengeDesc, { color: getContrastColor(colors.button) }]}>
-            A special {settings.gridSize || '8x8'} {weekAnimal.name.toLowerCase()} puzzle available all week
+            {hasPlayed ? "You've completed this week's challenge! View your results below." :
+             isExpired ? "This week's challenge has expired. A new one starts Monday at UTC midnight!" :
+             `All players worldwide see the SAME ${challengeName || 'weekly challenge'} this week!`}
           </Text>
 
-          {/* Challenge Stats */}
           <View style={styles.statsGrid}>
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
-                Difficulty
-              </Text>
-              <View style={[styles.difficultyBadge, { backgroundColor: '#9C27B0' }]}>
-                <Text style={styles.difficultyText}>EXPERT</Text>
-              </View>
+              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>Difficulty</Text>
+              <View style={[styles.difficultyBadge, { backgroundColor: '#9C27B0' }]}><Text style={styles.difficultyText}>EXPERT</Text></View>
             </View>
-            
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
-                Your Best
-              </Text>
+              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>Your Best</Text>
               <Text style={[styles.statValue, { color: getContrastColor(colors.button) }]}>
-                ⏱️ {challengeResult?.bestTime && challengeActive ? formatTimeDisplay(challengeResult.bestTime) : '--:--'}
+                ⏱️ {challengeResult?.bestTime ? formatTimeDisplay(challengeResult.bestTime) : '--:--'}
               </Text>
             </View>
-            
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
-                Time Left
-              </Text>
-              <Text style={[styles.timer, { color: isUrgent ? '#FF5722' : '#1565C0' }]}>
-                ⏰ {timeRemaining}
-              </Text>
+              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>Time Left</Text>
+              <Text style={[styles.timer, { color: isUrgent ? '#FF5722' : '#1565C0' }]}>⏰ {timeRemaining}</Text>
             </View>
-            
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>
-                Players
-              </Text>
-              <Text style={[styles.statValue, { color: getContrastColor(colors.button) }]}>
-                👥 {playerCount.toLocaleString()}
-              </Text>
+              <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>Players</Text>
+              <Text style={[styles.statValue, { color: getContrastColor(colors.button) }]}>👥 {playerCount.toLocaleString()}</Text>
             </View>
           </View>
 
-          {/* Your Performance */}
-          <View style={[styles.performanceContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
-            <Text style={[styles.performanceTitle, { color: getContrastColor(colors.button) }]}>
-              Your Performance
-            </Text>
-            
-            {hasPlayed && challengeActive ? (
-              <View style={styles.completedStats}>
-                <Text style={[styles.completedText, { color: '#4CAF50' }]}>
-                  ✅ Weekly Challenge Completed
-                </Text>
-                {challengeResult?.bestTime && (
-                  <Text style={[styles.bestTime, { color: getContrastColor(colors.button) }]}>
-                    Best Time: {formatTimeDisplay(challengeResult.bestTime)}
-                  </Text>
-                )}
-                {challengeResult?.isPerfect && (
-                  <Text style={[styles.perfectBadge, { color: '#FFD700' }]}>
-                    ✨ Perfect Game!
-                  </Text>
-                )}
-                <Text style={[styles.rankText, { color: getContrastColor(colors.button) }]}>
-                  Your Rank: {getRankDisplay(userRank)} of {playerCount}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.incompleteStats}>
-                <Text style={[styles.incompleteText, { color: getContrastColor(colors.button) }]}>
-                  {attempts > 0 
-                    ? `Attempts this week: ${attempts}` 
-                    : 'Not attempted yet'}
-                </Text>
-                {attempts > 0 && !hasPlayed && (
-                  <Text style={[styles.attemptHint, { color: getContrastColor(colors.button), opacity: 0.8 }]}>
-                    Keep trying to complete the challenge!
-                  </Text>
-                )}
-              </View>
-            )}
-          </View>
+          {hasPlayed && (
+            <View style={[styles.completedContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+              <Text style={[styles.completedText, { color: '#4CAF50' }]}>✅ Weekly Challenge Completed!</Text>
+              {challengeResult?.bestTime && (
+                <Text style={[styles.bestTime, { color: getContrastColor(colors.button) }]}>Best Time: {formatTimeDisplay(challengeResult.bestTime)}</Text>
+              )}
+              {challengeResult?.isPerfect && <Text style={[styles.perfectBadge, { color: '#FFD700' }]}>✨ Perfect Game!</Text>}
+              <Text style={[styles.rankText, { color: getContrastColor(colors.button) }]}>Your Rank: {getRankDisplay(userRank)} of {playerCount}</Text>
+            </View>
+          )}
 
-          {/* Start/View Results Button */}
           <TouchableOpacity 
-            style={[
-              styles.startButton, 
-              { 
-                backgroundColor: !challengeActive ? '#1565C0' : (hasPlayed ? '#666' : '#1565C0'),
-              }
-            ]}
+            style={[styles.startButton, { backgroundColor: getButtonColor() }]}
             onPress={handleButtonPress}
           >
-            <Text style={styles.startButtonText}>
-              {getButtonText()}
-            </Text>
+            <Text style={styles.startButtonText}>{getButtonText()}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ===== LEADERBOARD SECTION ===== */}
-        {/* Only show if user has played and challenge is active */}
-        {hasPlayed && challengeActive && (
+        {hasPlayed && (
           <View style={[styles.leaderboardSection, { backgroundColor: colors.button }]}>
-            {/* Leaderboard Toggle Header */}
-            <TouchableOpacity 
-              style={styles.leaderboardHeader}
-              onPress={() => setShowLeaderboard(!showLeaderboard)}
-            >
-              <Text style={[styles.leaderboardTitle, { color: getContrastColor(colors.button) }]}>
-                🏆 Weekly Leaderboard
-              </Text>
-              <Text style={[styles.leaderboardToggle, { color: getContrastColor(colors.button) }]}>
-                {showLeaderboard ? '▼' : '▶'}
-              </Text>
+            <TouchableOpacity style={styles.leaderboardHeader} onPress={() => setShowLeaderboard(!showLeaderboard)}>
+              <Text style={[styles.leaderboardTitle, { color: getContrastColor(colors.button) }]}>🏆 Weekly Leaderboard</Text>
+              <Text style={[styles.leaderboardToggle, { color: getContrastColor(colors.button) }]}>{showLeaderboard ? '▼' : '▶'}</Text>
             </TouchableOpacity>
-
-            {/* Leaderboard Content */}
             {showLeaderboard && (
               <View style={styles.leaderboardContent}>
                 <ChallengeLeaderboard challengeId={challengeId} />
               </View>
             )}
-
-            {/* Stats Preview when collapsed */}
             {!showLeaderboard && (
               <View style={styles.leaderboardPreview}>
                 <Text style={[styles.leaderboardPreviewText, { color: getContrastColor(colors.button), opacity: 0.9 }]}>
@@ -455,7 +377,6 @@ const WeeklyChallengeScreen = () => {
           </View>
         )}
 
-        {/* Footer */}
         <AppFooter textColor={colors.text} version="1.0.0" />
       </ScrollView>
     </SafeAreaView>
@@ -463,207 +384,44 @@ const WeeklyChallengeScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 15,
-    fontSize: 16,
-  },
-  container: {
-    flex: 1,
-  },
-  header: {
-    padding: 25,
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  subtitle: {
-    fontSize: 16,
-    opacity: 0.9,
-    textAlign: 'center',
-  },
-  utcNote: {
-    fontSize: 12,
-    marginTop: 5,
-  },
-  challengeCard: {
-    margin: 20,
-    padding: 25,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  badge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginBottom: 15,
-  },
-  badgeText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  challengeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  challengeTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    flex: 1,
-  },
-  gridSizeBadge: {
-    fontSize: 14,
-    fontWeight: '600',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  challengeDesc: {
-    fontSize: 16,
-    opacity: 0.9,
-    marginBottom: 20,
-    lineHeight: 22,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  statBox: {
-    width: '48%',
-    marginBottom: 15,
-  },
-  statLabel: {
-    fontSize: 12,
-    marginBottom: 5,
-  },
-  difficultyBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  difficultyText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  timer: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  performanceContainer: {
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  performanceTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 15,
-  },
-  completedStats: {
-    alignItems: 'center',
-  },
-  completedText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  bestTime: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 5,
-  },
-  perfectBadge: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  rankText: {
-    fontSize: 16,
-    marginBottom: 8,
-    fontWeight: '600',
-  },
-  incompleteStats: {
-    alignItems: 'center',
-  },
-  incompleteText: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 8,
-  },
-  attemptHint: {
-    fontSize: 14,
-    fontStyle: 'italic',
-  },
-  startButton: {
-    paddingVertical: 16,
-    borderRadius: 15,
-    alignItems: 'center',
-  },
-  startButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  // Leaderboard styles
-  leaderboardSection: {
-    marginHorizontal: 20,
-    marginBottom: 30,
-    borderRadius: 15,
-    overflow: 'hidden',
-  },
-  leaderboardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 15,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-  },
-  leaderboardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  leaderboardToggle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  leaderboardContent: {
-    padding: 10,
-    minHeight: 200,
-  },
-  leaderboardPreview: {
-    padding: 15,
-    alignItems: 'center',
-  },
-  leaderboardPreviewText: {
-    fontSize: 14,
-    textAlign: 'center',
-  },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 15, fontSize: 16 },
+  container: { flex: 1 },
+  header: { padding: 25, borderBottomLeftRadius: 25, borderBottomRightRadius: 25, alignItems: 'center' },
+  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 15 },
+  challengeNameContainer: { alignItems: 'center', marginBottom: 15, paddingHorizontal: 10 },
+  challengeNameText: { fontSize: 20, fontWeight: '600', textAlign: 'center' },
+  timeContainer: { alignItems: 'center', marginBottom: 8, width: '100%' },
+  timeLabel: { fontSize: 12, fontWeight: '500', marginBottom: 2 },
+  timeValue: { fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  challengeCard: { margin: 20, padding: 25, borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 8 },
+  badge: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginBottom: 15 },
+  badgeText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  challengeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  challengeTitle: { fontSize: 24, fontWeight: 'bold', flex: 1 },
+  gridSizeBadge: { fontSize: 14, fontWeight: '600', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  challengeDesc: { fontSize: 16, opacity: 0.9, marginBottom: 20, lineHeight: 22 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
+  statBox: { width: '48%', marginBottom: 15 },
+  statLabel: { fontSize: 12, marginBottom: 5 },
+  difficultyBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start' },
+  difficultyText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  statValue: { fontSize: 16, fontWeight: '600' },
+  timer: { fontSize: 16, fontWeight: 'bold' },
+  completedContainer: { padding: 15, borderRadius: 12, alignItems: 'center', marginBottom: 20 },
+  completedText: { fontSize: 18, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
+  bestTime: { fontSize: 16, fontWeight: '500', marginBottom: 5 },
+  perfectBadge: { fontSize: 16, fontWeight: 'bold', marginBottom: 5 },
+  rankText: { fontSize: 16, marginBottom: 8, fontWeight: '600' },
+  startButton: { paddingVertical: 16, borderRadius: 15, alignItems: 'center' },
+  startButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  leaderboardSection: { marginHorizontal: 20, marginBottom: 30, borderRadius: 15, overflow: 'hidden' },
+  leaderboardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'rgba(0,0,0,0.05)' },
+  leaderboardTitle: { fontSize: 18, fontWeight: 'bold' },
+  leaderboardToggle: { fontSize: 18, fontWeight: 'bold' },
+  leaderboardContent: { padding: 10, minHeight: 200 },
+  leaderboardPreview: { padding: 15, alignItems: 'center' },
+  leaderboardPreviewText: { fontSize: 14, textAlign: 'center' },
 });
 
 export default WeeklyChallengeScreen;

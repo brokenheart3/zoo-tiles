@@ -16,12 +16,18 @@
     "noEmit": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+
+    // ✅ FIX: silence TypeScript deprecation warning
+    "ignoreDeprecations": "6.0",
+
+    // keep this for Expo compatibility
     "baseUrl": ".",
     "paths": {
       "@/*": [
         "./src/*"
       ]
     },
+
     "types": [
       "react",
       "react-native"

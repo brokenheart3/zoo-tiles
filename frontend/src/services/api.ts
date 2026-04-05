@@ -33,7 +33,6 @@ export interface CategoryFact {
   facts: string[];
 }
 
-// Legacy Fact interface for backward compatibility
 export interface Fact {
   id: number;
   name: string;
@@ -42,17 +41,23 @@ export interface Fact {
 }
 
 // ============================
-// BASE URL
+// BASE URL - Your Backend Server
 // ============================
-
-const BASE_URL = 'https://raw.githubusercontent.com/brokenheart3/sudoAPI/main';
+// For development (change to your actual IP for physical device testing)
+const BASE_URL = 'http://localhost:3000';
+// For production, you would use:
+// const BASE_URL = 'https://your-production-server.com';
 
 // ============================
-// AXIOS
+// AXIOS CONFIG
 // ============================
 
 const axiosConfig = {
   timeout: 15000,
+  headers: {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+  }
 };
 
 const loadJson = async <T>(url: string): Promise<T> => {
@@ -60,8 +65,8 @@ const loadJson = async <T>(url: string): Promise<T> => {
   try {
     const { data } = await axios.get<T>(url, axiosConfig);
     return data;
-  } catch (error) {
-    console.error('❌ API Request failed:', url, error);
+  } catch (error: any) {
+    console.error('❌ API Request failed:', url, error?.response?.status || error.message);
     throw error;
   }
 };
@@ -85,7 +90,6 @@ const getDifficultyFolder = (difficulty: string): string => {
 // HELPER: Get category folder name
 // ============================
 const getCategoryFolder = (category: Category): string => {
-  // Direct mapping - folder names match category names exactly
   const categoryMap: Record<Category, string> = {
     aircraft: 'aircraft',
     animals: 'animals',
@@ -159,60 +163,44 @@ export const getCategoryInfo = (category: Category) => {
 };
 
 // ============================
-// CORE: GET RANDOM PUZZLE FROM REPO BY CATEGORY AND DIFFICULTY
+// CORE: GET RANDOM PUZZLE FROM BACKEND
 // ============================
-
 async function getPuzzleFromRepo(
   category: Category, 
   size: number, 
   difficulty: string
 ): Promise<PuzzleResponse> {
   const difficultyFolder = getDifficultyFolder(difficulty);
-  const categoryFolder = getCategoryFolder(category);
   
   console.log('========== DEBUG ==========');
   console.log('Category:', category);
   console.log('Size:', size);
   console.log('Difficulty:', difficulty);
   
-  const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
-  console.log('Fetching index:', indexUrl);
-  
-  const index = await loadJson<any>(indexUrl);
-  const files = index.files;
-  
-  if (!files || files.length === 0) {
-    throw new Error('No files found in index');
+  try {
+    // Call your backend server instead of GitHub directly
+    const url = `${BASE_URL}/puzzle/${category}/${size}/${difficultyFolder}`;
+    console.log('Fetching from backend:', url);
+    
+    const puzzle = await loadJson<PuzzleResponse>(url);
+    
+    if (!puzzle) {
+      throw new Error('No puzzle returned from backend');
+    }
+    
+    console.log('Selected puzzle ID:', puzzle.id);
+    console.log('=========================');
+    
+    return { ...puzzle, category };
+  } catch (error) {
+    console.error('Failed to fetch puzzle from backend:', error);
+    throw new Error(`No puzzle found for ${category}/${size}/${difficulty}`);
   }
-  
-  // Handle both string[] and object[] formats
-  const fileEntries = files.map((f: any) => typeof f === 'string' ? { file: f } : f);
-  
-  const randomIndex = Math.floor(Math.random() * fileEntries.length);
-  const randomFile = fileEntries[randomIndex].file;
-  console.log('Selected file:', randomFile);
-  
-  const fileUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/${randomFile}`;
-  console.log('Fetching puzzle file:', fileUrl);
-  
-  const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
-  
-  if (!puzzles || puzzles.length === 0) {
-    throw new Error('No puzzles found in file');
-  }
-  
-  const puzzleIndex = Math.floor(Math.random() * puzzles.length);
-  const puzzle = puzzles[puzzleIndex];
-  console.log('Selected puzzle ID:', puzzle.id);
-  console.log('=========================');
-  
-  return { ...puzzle, category };
 }
 
 // ============================
-// 1️⃣ SEQUENTIAL - RANDOM PUZZLE BY CATEGORY AND DIFFICULTY
+// 1️⃣ SEQUENTIAL - RANDOM PUZZLE
 // ============================
-
 export async function fetchSequentialPuzzle(
   category: Category = 'animals',
   size: number,
@@ -230,49 +218,24 @@ export async function fetchSequentialPuzzle(
 }
 
 // ============================
-// 2️⃣ DAILY CHALLENGE - DETERMINISTIC PUZZLE BASED ON DAY
+// 2️⃣ DAILY CHALLENGE
 // ============================
-
 export async function fetchDailyChallenge(
   category: Category = 'animals',
-  size: number,
-  difficulty: string = 'easy'
+  size: number
 ): Promise<PuzzleResponse | null> {
-  console.log('📅 fetchDailyChallenge - Called with:', { category, size, difficulty });
+  console.log('📅 fetchDailyChallenge - Called with:', { category, size });
   try {
-    const difficultyFolder = getDifficultyFolder(difficulty);
-    const categoryFolder = getCategoryFolder(category);
+    const url = `${BASE_URL}/daily/${category}/${size}`;
+    console.log('Fetching daily challenge from:', url);
     
-    const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
-    console.log('📅 Loading daily index from:', indexUrl);
+    const puzzle = await loadJson<PuzzleResponse>(url);
     
-    const index = await loadJson<any>(indexUrl);
-    const files = index.files;
+    if (!puzzle) {
+      throw new Error('No daily puzzle returned');
+    }
     
-    // Handle both string[] and object[] formats
-    const fileEntries = files.map((f: any) => typeof f === 'string' ? { file: f } : f);
-
-    const now = new Date();
-    const start = new Date(now.getFullYear(), 0, 0);
-    const diff = now.getTime() - start.getTime();
-    const oneDay = 1000 * 60 * 60 * 24;
-    const dayOfYear = Math.floor(diff / oneDay);
-    
-    console.log('📅 Day of year:', dayOfYear);
-
-    const fileIndex = dayOfYear % fileEntries.length;
-    const file = fileEntries[fileIndex].file;
-    console.log(`📅 Selected file ${fileIndex + 1}/${fileEntries.length}:`, file);
-
-    const fileUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/${file}`;
-    const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
-
-    const puzzleIndex = dayOfYear % puzzles.length;
-    const puzzle = puzzles[puzzleIndex];
-    
-    console.log(`📅 Selected puzzle ${puzzleIndex + 1}/${puzzles.length}`);
-    console.log('✅ Daily puzzle loaded');
-    
+    console.log('✅ Daily puzzle loaded, ID:', puzzle.id);
     return { ...puzzle, category };
   } catch (err) {
     console.error('❌ Daily fetch failed:', err);
@@ -281,46 +244,24 @@ export async function fetchDailyChallenge(
 }
 
 // ============================
-// 3️⃣ WEEKLY CHALLENGE - DETERMINISTIC PUZZLE BASED ON WEEK
+// 3️⃣ WEEKLY CHALLENGE
 // ============================
-
 export async function fetchWeeklyChallenge(
   category: Category = 'animals',
-  size: number,
-  difficulty: string = 'easy'
+  size: number
 ): Promise<PuzzleResponse | null> {
-  console.log('📆 fetchWeeklyChallenge - Called with:', { category, size, difficulty });
+  console.log('📆 fetchWeeklyChallenge - Called with:', { category, size });
   try {
-    const difficultyFolder = getDifficultyFolder(difficulty);
-    const categoryFolder = getCategoryFolder(category);
+    const url = `${BASE_URL}/weekly/${category}/${size}`;
+    console.log('Fetching weekly challenge from:', url);
     
-    const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
-    console.log('📆 Loading weekly index from:', indexUrl);
+    const puzzle = await loadJson<PuzzleResponse>(url);
     
-    const index = await loadJson<any>(indexUrl);
-    const files = index.files;
+    if (!puzzle) {
+      throw new Error('No weekly puzzle returned');
+    }
     
-    // Handle both string[] and object[] formats
-    const fileEntries = files.map((f: any) => typeof f === 'string' ? { file: f } : f);
-
-    const now = new Date();
-    const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
-    const pastDaysOfYear = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
-    const weekNumber = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
-    
-    console.log('📆 Week number:', weekNumber);
-
-    const fileIndex = weekNumber % fileEntries.length;
-    const file = fileEntries[fileIndex].file;
-    console.log(`📆 Selected file ${fileIndex + 1}/${fileEntries.length}:`, file);
-
-    const fileUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/${file}`;
-    const puzzles = await loadJson<PuzzleResponse[]>(fileUrl);
-
-    // Use first puzzle of the file for weekly consistency
-    const puzzle = puzzles[0];
-    console.log('✅ Weekly puzzle loaded');
-    
+    console.log('✅ Weekly puzzle loaded, ID:', puzzle.id);
     return { ...puzzle, category };
   } catch (err) {
     console.error('❌ Weekly fetch failed:', err);
@@ -331,24 +272,29 @@ export async function fetchWeeklyChallenge(
 // ============================
 // 4️⃣ CATEGORY FACTS
 // ============================
+let factsCache: Record<string, CategoryFact[]> = {};
 
 export async function fetchCategoryFacts(category: Category): Promise<CategoryFact[] | null> {
   try {
-    const categoryFolder = getCategoryFolder(category);
+    // Check cache first
+    if (factsCache[category]) {
+      console.log(`📚 Returning cached facts for ${category}`);
+      return factsCache[category];
+    }
     
-    // Correct URL pattern based on your repo structure: /{category}/facts/{category}_fact.json
-    const url = `${BASE_URL}/${categoryFolder}/facts/${categoryFolder}_fact.json`;
+    const url = `${BASE_URL}/facts/${category}`;
     console.log(`📚 Fetching ${category} facts from:`, url);
     
-    const data = await loadJson<CategoryFact[]>(url);
-    if (data && data.length > 0) {
-      console.log(`✅ Found ${data.length} fact items for ${category}`);
-      return data;
+    const facts = await loadJson<CategoryFact[]>(url);
+    
+    if (facts && facts.length > 0) {
+      factsCache[category] = facts;
+      console.log(`✅ Found ${facts.length} fact items for ${category}`);
+      return facts;
     }
     
     console.log(`⚠️ No facts found for ${category}`);
     return null;
-    
   } catch (err) {
     console.error(`❌ ${category} facts fetch failed:`, err);
     return null;
@@ -358,7 +304,6 @@ export async function fetchCategoryFacts(category: Category): Promise<CategoryFa
 // ============================
 // 5️⃣ DAILY CATEGORY FACT ROTATION
 // ============================
-
 export async function fetchDailyCategoryFact(category: Category = 'animals'): Promise<string | null> {
   try {
     const storageKey = `@daily_${category}_fact_index`;
@@ -386,12 +331,8 @@ export async function fetchDailyCategoryFact(category: Category = 'animals'): Pr
       currentIndex.factIdx++;
     }
 
-    await AsyncStorage.setItem(
-      storageKey,
-      JSON.stringify(currentIndex)
-    );
+    await AsyncStorage.setItem(storageKey, JSON.stringify(currentIndex));
 
-    // Format the fact with emoji and category name
     const emoji = getCategoryEmoji(category);
     const factString = `${emoji} ${factItem.name}: ${fact}`;
     console.log(`📚 Daily ${category} fact:`, factString.substring(0, 100) + '...');
@@ -405,92 +346,69 @@ export async function fetchDailyCategoryFact(category: Category = 'animals'): Pr
 }
 
 // ============================
-// 6️⃣ CHECK IF CATEGORY EXISTS FOR A GIVEN SIZE/DIFFICULTY
+// 6️⃣ GET AVAILABLE SIZES FROM BACKEND
 // ============================
-
-export async function checkCategoryExists(
-  category: Category, 
-  size: number, 
-  difficulty: string
-): Promise<boolean> {
+export async function getAvailableSizes(): Promise<number[]> {
   try {
-    const difficultyFolder = getDifficultyFolder(difficulty);
-    const categoryFolder = getCategoryFolder(category);
-    
-    const indexUrl = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
-    await loadJson<any>(indexUrl);
-    return true;
-  } catch {
+    const url = `${BASE_URL}/sizes`;
+    const response = await loadJson<{ sizes: number[] }>(url);
+    return response.sizes || [5, 6, 7, 8, 9, 10, 11, 12, 16];
+  } catch (err) {
+    console.error('Failed to fetch sizes:', err);
+    return [5, 6, 7, 8, 9, 10, 11, 12, 16];
+  }
+}
+
+// ============================
+// 7️⃣ GET AVAILABLE DIFFICULTIES FROM BACKEND
+// ============================
+export async function getAvailableDifficulties(): Promise<string[]> {
+  try {
+    const url = `${BASE_URL}/difficulties`;
+    const response = await loadJson<{ difficulties: string[] }>(url);
+    return response.difficulties || ['easy', 'medium', 'hard', 'expert'];
+  } catch (err) {
+    console.error('Failed to fetch difficulties:', err);
+    return ['easy', 'medium', 'hard', 'expert'];
+  }
+}
+
+// ============================
+// 8️⃣ GET ALL CATEGORIES FROM BACKEND
+// ============================
+export async function getAvailableCategories(): Promise<Category[]> {
+  try {
+    const url = `${BASE_URL}/categories`;
+    const response = await loadJson<{ categories: Category[] }>(url);
+    return response.categories || getAllCategories();
+  } catch (err) {
+    console.error('Failed to fetch categories:', err);
+    return getAllCategories();
+  }
+}
+
+// ============================
+// 9️⃣ CHECK BACKEND HEALTH
+// ============================
+export async function checkBackendHealth(): Promise<boolean> {
+  try {
+    const url = `${BASE_URL}/health`;
+    const response = await loadJson<{ status: string }>(url);
+    return response.status === 'ok';
+  } catch (err) {
+    console.error('Backend health check failed:', err);
     return false;
   }
 }
 
 // ============================
-// 7️⃣ GET AVAILABLE SIZES FOR CATEGORY AND DIFFICULTY
+// UTILITIES
 // ============================
-
-export async function getAvailableSizes(
-  category: Category, 
-  difficulty: string
-): Promise<number[]> {
-  try {
-    const difficultyFolder = getDifficultyFolder(difficulty);
-    const categoryFolder = getCategoryFolder(category);
-    
-    // Common puzzle sizes - adjust based on your actual data
-    const sizes = [5, 6, 7, 8, 9, 10, 11, 12, 16];
-    const availableSizes: number[] = [];
-    
-    for (const size of sizes) {
-      try {
-        const url = `${BASE_URL}/${categoryFolder}/${size}/${difficultyFolder}/index.json`;
-        await loadJson<any>(url);
-        availableSizes.push(size);
-      } catch {
-        // Size not available, skip
-      }
-    }
-    
-    return availableSizes;
-  } catch {
-    return [];
-  }
-}
-
-// ============================
-// 8️⃣ GET AVAILABLE DIFFICULTIES FOR CATEGORY AND SIZE
-// ============================
-
-export async function getAvailableDifficulties(
-  category: Category,
-  size: number
-): Promise<string[]> {
-  const difficulties = ['easy', 'medium', 'hard', 'expert'];
-  const available: string[] = [];
-  
-  for (const difficulty of difficulties) {
-    const exists = await checkCategoryExists(category, size, difficulty);
-    if (exists) {
-      available.push(difficulty);
-    }
-  }
-  
-  return available;
-}
-
-// ============================
-// 9️⃣ GET RANDOM CATEGORY
-// ============================
-
 export function getRandomCategory(): Category {
   const categories = getAllCategories();
   const randomIndex = Math.floor(Math.random() * categories.length);
   return categories[randomIndex];
 }
-
-// ============================
-// 🔟 VALIDATE CATEGORY
-// ============================
 
 export function isValidCategory(category: string): category is Category {
   return getAllCategories().includes(category as Category);
@@ -499,17 +417,10 @@ export function isValidCategory(category: string): category is Category {
 // ============================
 // BACKWARD COMPATIBILITY
 // ============================
-
-/**
- * @deprecated Use fetchDailyCategoryFact with category parameter instead
- */
 export async function fetchDailyAnimalFact(): Promise<string | null> {
   return fetchDailyCategoryFact('animals');
 }
 
-/**
- * @deprecated Use fetchCategoryFacts with category parameter instead
- */
 export async function fetchAnimalFacts(): Promise<Fact[] | null> {
   const facts = await fetchCategoryFacts('animals');
   if (!facts) return null;

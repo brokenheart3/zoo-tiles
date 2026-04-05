@@ -15,6 +15,25 @@ module.exports = function(api) {
           verbose: true
         }
       ],
+      // Add this for absolute imports
+      [
+        "module-resolver",
+        {
+          root: ["./"],
+          alias: {
+            "@": "./src",
+            "@assets": "./assets",
+            "@components": "./src/components",
+            "@screens": "./src/screens",
+            "@navigation": "./src/navigation",
+            "@utils": "./src/utils",
+            "@hooks": "./src/hooks",
+            "@services": "./src/services",
+            "@store": "./src/store",
+            "@types": "./src/types"
+          }
+        }
+      ],
       "react-native-reanimated/plugin"
     ],
   };

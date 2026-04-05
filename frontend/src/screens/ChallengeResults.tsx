@@ -17,6 +17,8 @@ import { getUserChallengeResult } from '../services/userService';
 import { auth } from '../services/firebase';
 import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import { getCategoryDisplayName, getCategoryEmoji } from '../utils/categoryHelpers';
+import { Category } from '../services/api';
 
 type ChallengeResultsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ChallengeResults'>;
 
@@ -37,17 +39,34 @@ const ChallengeResults = () => {
   const { theme } = React.useContext(ThemeContext);
   const colors = themeStyles[theme];
 
-  const { challengeId, challengeType, time, isPerfect, moves, correctMoves, wrongMoves, accuracy, completed } = route.params || {};
+  const { 
+    challengeId, 
+    challengeType, 
+    time, 
+    isPerfect, 
+    moves, 
+    correctMoves, 
+    wrongMoves, 
+    accuracy, 
+    completed,
+    category 
+  } = route.params || {};
   
-  // Debug log to see what params are received
+  // Debug log
   console.log('📊 ChallengeResults - Received params:', route.params);
+  console.log('📊 Category received:', category);
+
+  // Get category info
+  const selectedCategory: Category = category || 'animals';
+  const categoryName = getCategoryDisplayName(selectedCategory);
+  const categoryEmoji = getCategoryEmoji(selectedCategory);
 
   const [result, setResult] = useState<ChallengeResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const isDaily = challengeType === 'daily';
-  const challengeName = isDaily ? 'Daily Challenge' : 'Weekly Challenge';
+  const challengeName = isDaily ? `Daily ${categoryName} Challenge` : `Weekly ${categoryName} Challenge`;
 
   useEffect(() => {
     loadResult();
@@ -60,7 +79,6 @@ const ChallengeResults = () => {
       
       // If we have params from navigation, use them first
       if (time !== undefined && moves !== undefined) {
-        // Calculate accuracy if not provided
         const calculatedAccuracy = accuracy !== undefined ? accuracy :
           (correctMoves !== undefined && moves !== undefined && moves > 0) 
             ? (correctMoves / moves) * 100 
@@ -110,44 +128,17 @@ const ChallengeResults = () => {
 
   const getAccuracyColor = (accuracy?: number) => {
     if (!accuracy) return colors.text;
-    if (accuracy >= 95) return '#4CAF50'; // Green - Excellent
-    if (accuracy >= 80) return '#2196F3'; // Blue - Good
-    if (accuracy >= 60) return '#FF9800'; // Orange - Average
-    return '#F44336'; // Red - Needs practice
+    if (accuracy >= 95) return '#4CAF50';
+    if (accuracy >= 80) return '#2196F3';
+    if (accuracy >= 60) return '#FF9800';
+    return '#F44336';
   };
-
-  const getAnimalEmoji = () => {
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const today = dayNames[new Date().getDay()];
-    
-    const DAILY_ANIMALS: Record<string, string> = {
-      Monday: '🐒', Tuesday: '🐯', Wednesday: '🦒',
-      Thursday: '🐘', Friday: '🦁', Saturday: '🐼', Sunday: '🦓'
-    };
-    
-    const WEEKLY_ANIMALS = ['🦁', '🐘', '🦒', '🦓', '🐅', '🦍', '🐊', '🦏', '🐆', '🦛'];
-    
-    if (isDaily) {
-      return DAILY_ANIMALS[today] || '🦓';
-    } else {
-      const weekNum = parseInt(getWeekNumber(new Date()));
-      return WEEKLY_ANIMALS[(weekNum - 1) % WEEKLY_ANIMALS.length];
-    }
-  };
-
-  function getWeekNumber(date: Date): string {
-    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
-    const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
-    return String(Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7));
-  }
 
   const handleBackToHome = () => {
     navigation.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [
-          { name: 'Main' },
-        ],
+        routes: [{ name: 'Main' }],
       })
     );
   };
@@ -171,7 +162,6 @@ const ChallengeResults = () => {
     );
   }
 
-  // In ChallengeResults.tsx, add a retry button in the error state
   if (error || !result) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -211,11 +201,11 @@ const ChallengeResults = () => {
           <View style={{ width: 40 }} />
         </View>
 
-        {/* Challenge Info Card */}
+        {/* Challenge Info Card with Category Emoji */}
         <View style={[styles.challengeCard, { backgroundColor: colors.button }]}>
-          <Text style={styles.challengeEmoji}>{getAnimalEmoji()}</Text>
-          <Text style={[styles.challengeTitle, { color: colors.text }]}>{challengeName}</Text>
-          <Text style={[styles.challengeDate, { color: colors.text }]}>
+          <Text style={styles.challengeEmoji}>{categoryEmoji}</Text>
+          <Text style={[styles.challengeTitle, { color: '#fff' }]}>{challengeName}</Text>
+          <Text style={[styles.challengeDate, { color: '#fff', opacity: 0.9 }]}>
             {new Date().toLocaleDateString('en-US', { 
               weekday: 'long', 
               year: 'numeric', 
@@ -224,15 +214,14 @@ const ChallengeResults = () => {
             })}
           </Text>
           {result.completedAt && (
-            <Text style={[styles.completedDate, { color: colors.text }]}>
+            <Text style={[styles.completedDate, { color: '#fff', opacity: 0.7 }]}>
               Completed: {new Date(result.completedAt).toLocaleDateString()}
             </Text>
           )}
         </View>
 
-        {/* Stats Grid - 4 cards: Time, Moves, Accuracy, Correct/Wrong */}
+        {/* Stats Grid */}
         <View style={styles.statsGrid}>
-          {/* Time Card */}
           <View style={[styles.statCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.statValue, { color: colors.text }]}>
               {formatTime(result.bestTime)}
@@ -240,7 +229,6 @@ const ChallengeResults = () => {
             <Text style={[styles.statLabel, { color: colors.text }]}>Best Time</Text>
           </View>
 
-          {/* Moves Card */}
           <View style={[styles.statCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.statValue, { color: colors.text }]}>
               {result.moves || 0}
@@ -248,7 +236,6 @@ const ChallengeResults = () => {
             <Text style={[styles.statLabel, { color: colors.text }]}>Total Moves</Text>
           </View>
 
-          {/* Accuracy Card */}
           <View style={[styles.statCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.statValue, { color: getAccuracyColor(result.accuracy) }]}>
               {result.accuracy !== undefined && result.accuracy !== null 
@@ -258,7 +245,6 @@ const ChallengeResults = () => {
             <Text style={[styles.statLabel, { color: colors.text }]}>Accuracy</Text>
           </View>
 
-          {/* Correct/Wrong Card */}
           <View style={[styles.statCard, { backgroundColor: colors.card }]}>
             <View style={styles.correctWrongRow}>
               <Text style={[styles.correctText, { color: '#4CAF50' }]}>
@@ -319,7 +305,7 @@ const ChallengeResults = () => {
             style={[styles.homeButton, { backgroundColor: colors.button }]}
             onPress={handleBackToHome}
           >
-            <Text style={[styles.homeButtonText, { color: colors.text }]}>Back to Home</Text>
+            <Text style={[styles.homeButtonText, { color: '#fff' }]}>Back to Home</Text>
           </TouchableOpacity>
         </View>
 
@@ -408,12 +394,10 @@ const styles = StyleSheet.create({
   },
   challengeDate: {
     fontSize: 14,
-    opacity: 0.8,
     marginBottom: 4,
   },
   completedDate: {
     fontSize: 12,
-    opacity: 0.6,
   },
   statsGrid: {
     flexDirection: 'row',

@@ -15,12 +15,12 @@ const TermsScreen = () => {
         
         <Text style={[styles.sectionTitle, { color: colors.text }]}>1. Acceptance of Terms</Text>
         <Text style={[styles.paragraph, { color: colors.text }]}>
-          By using Zoo-Tiles, you agree to these Terms of Use. If you disagree with any part of these terms, you may not use our app.
+          By using Sudoku Tiles Pro, you agree to these Terms of Use. If you disagree with any part of these terms, you may not use our app.
         </Text>
 
         <Text style={[styles.sectionTitle, { color: colors.text }]}>2. App Usage</Text>
         <Text style={[styles.paragraph, { color: colors.text }]}>
-          Zoo-Tiles is a puzzle game designed for entertainment and cognitive exercise. You agree to use this app responsibly and for its intended purpose.
+          Sudoku Tiles Pro is a puzzle game designed for entertainment and cognitive exercise. You agree to use this app responsibly and for its intended purpose.
         </Text>
 
         <Text style={[styles.sectionTitle, { color: colors.text }]}>3. User Responsibilities</Text>
@@ -32,7 +32,7 @@ const TermsScreen = () => {
 
         <Text style={[styles.sectionTitle, { color: colors.text }]}>4. Intellectual Property</Text>
         <Text style={[styles.paragraph, { color: colors.text }]}>
-          All content, design, graphics, and code in Zoo-Tiles are owned by the developers and protected by copyright laws.
+          All content, design, graphics, and code in Sudoku Tiles Pro are owned by the developers and protected by copyright laws.
         </Text>
 
         <Text style={[styles.sectionTitle, { color: colors.text }]}>5. Limitation of Liability</Text>
@@ -52,11 +52,11 @@ const TermsScreen = () => {
 
         <Text style={[styles.sectionTitle, { color: colors.text }]}>8. Contact</Text>
         <Text style={[styles.paragraph, { color: colors.text }]}>
-          For questions about these Terms, contact us at: support@zootiles.com
+          For questions about these Terms, contact us at: sudokutiles1@gmail.com
         </Text>
 
         <Text style={[styles.footer, { color: colors.text }]}>
-          Thank you for using Zoo-Tiles!
+          Thank you for using Sudoku Tiles Pro!
         </Text>
       </ScrollView>
     </SafeAreaView>

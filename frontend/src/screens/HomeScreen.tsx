@@ -1,24 +1,23 @@
 // src/screens/HomeScreen.tsx
-import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
+import React, { useContext, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   SafeAreaView,
-  Share,
   TouchableOpacity,
   Alert,
-  Platform,
-  Linking,
-} from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ThemeContext, themeStyles } from '../context/ThemeContext';
-import { useSettings } from '../context/SettingsContext';
-import { useProfile } from '../context/ProfileContext';
-import { goToPlay } from '../navigation/goToPlay';
+} from "react-native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { ThemeContext, themeStyles } from "../context/ThemeContext";
+import { useSettings } from "../context/SettingsContext";
+import { useProfile } from "../context/ProfileContext";
+import { useGameMode } from "../context/GameModeContext";
+import { goToPlay } from "../navigation/goToPlay";
+import { challengeService } from "../services/challengeService";
 
 // Import category helpers
 import {
@@ -30,8 +29,8 @@ import {
   getWeeklyItemsForCategory,
   getDailyPreview,
   getWeeklyPreview,
-} from '../utils/categoryHelpers';
-import { Category } from '../services/api';
+} from "../utils/categoryHelpers";
+import { Category } from "../services/api";
 
 // Import homescreen components
 import {
@@ -42,15 +41,16 @@ import {
   AchievementsList,
   StatsSummary,
   SettingsLink,
-} from '../components/homescreen';
-import { AppFooter } from '../components/common';
+} from "../components/homescreen";
+import { AppFooter } from "../components/common";
+import ShareInvite from "../components/common/ShareInvite";
 
 // Import services
-import { getChallengePlayerCount } from '../services/simpleChallengeService';
-import { getTimeRemaining, getWeekNumber, getUTCDateString } from '../utils/timeUtils';
-import { fetchDailyCategoryFact } from '../services/api';
-import { getStatisticsData, getUserChallengeResult } from '../services/userService';
-import { auth } from '../services/firebase';
+import { getChallengePlayerCount } from "../services/simpleChallengeService";
+import { getUTCDateString, getWeekNumber, getTimeRemaining } from "../utils/timeUtils";
+import { fetchDailyCategoryFact } from "../services/api";
+import { getStatisticsData, getUserChallengeResult } from "../services/userService";
+import { auth } from "../services/firebase";
 
 // Navigation types
 type RootStackParamList = {
@@ -60,12 +60,6 @@ type RootStackParamList = {
     difficulty: string;
     challengeType?: 'daily' | 'weekly';
     challengeId?: string;
-    category?: string;
-  };
-  Challenge: {
-    screen: 'Daily' | 'Weekly';
-    challengeId?: string;
-    viewResults?: boolean;
     category?: string;
   };
   ChallengeResults: {
@@ -86,7 +80,7 @@ type RootStackParamList = {
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-// Grid size properties for all 9 grid sizes
+// Grid size properties
 const GRID_SIZE_PROPERTIES = {
   '5x5': { emoji: '🐭', difficulty: 'Easy', label: '5x5' },
   '6x6': { emoji: '🐘', difficulty: 'Easy', label: '6x6' },
@@ -107,50 +101,10 @@ const DIFFICULTY_COLORS = {
   Expert: { bg: '#9C27B0', text: '#ffffff' },
 };
 
-// Default settings
 const DEFAULT_SETTINGS = {
   gridSize: '8x8' as const,
   difficulty: 'Medium' as const,
   category: 'animals' as Category,
-};
-
-// Helper to check if daily challenge is urgent
-const isDailyChallengeUrgent = (timeString: string): boolean => {
-  if (!timeString || timeString.includes('Loading')) return false;
-  if (timeString.includes('Expired')) return true;
-  
-  const hasHours = timeString.includes('h');
-  const hasDays = timeString.includes('d');
-  
-  if (hasDays) {
-    const daysMatch = timeString.match(/(\d+)d/);
-    if (daysMatch && parseInt(daysMatch[1]) === 0) return true;
-  } else if (hasHours) {
-    const hoursMatch = timeString.match(/(\d+)h/);
-    if (hoursMatch && parseInt(hoursMatch[1]) === 0) return true;
-  } else {
-    return true;
-  }
-  
-  return false;
-};
-
-// Helper to check if weekly challenge is urgent
-const isWeeklyChallengeUrgent = (timeString: string): boolean => {
-  if (!timeString || timeString.includes('Loading')) return false;
-  if (timeString.includes('Expired')) return true;
-  
-  const daysMatch = timeString.match(/(\d+)d/);
-  if (daysMatch) {
-    const days = parseInt(daysMatch[1]);
-    if (days === 0) return true;
-    if (days === 1) {
-      const hoursMatch = timeString.match(/(\d+)h/);
-      if (hoursMatch && parseInt(hoursMatch[1]) < 12) return true;
-    }
-  }
-  
-  return false;
 };
 
 // Helper for pluralization
@@ -158,14 +112,12 @@ const pluralize = (count: number, singular: string, plural: string) => {
   return count === 1 ? singular : plural;
 };
 
-// Helper to extract fact name and emoji from fact string
-// Fact format: "emoji FactName: The actual fact..."
+// Helper to extract fact info
 const extractFactInfo = (factString: string): { factName: string; factEmoji: string; factText: string } => {
   if (!factString) {
     return { factName: '', factEmoji: '', factText: '' };
   }
   
-  // Pattern: starts with emoji (any emoji), then space, then a name, then colon
   const emojiPattern = /^([\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+)/u;
   const emojiMatch = factString.match(emojiPattern);
   const factEmoji = emojiMatch ? emojiMatch[1] : '';
@@ -183,44 +135,29 @@ const extractFactInfo = (factString: string): { factName: string; factEmoji: str
   return { factName: '', factEmoji, factText: factString };
 };
 
-// Share options
-const SHARE_OPTIONS = [
-  { id: 'native', name: 'Share via...', icon: '📱', color: '#4CAF50', action: 'native' },
-  { id: 'whatsapp', name: 'WhatsApp', icon: '💬', color: '#25D366', action: 'whatsapp' },
-  { id: 'telegram', name: 'Telegram', icon: '✈️', color: '#26A5E4', action: 'telegram' },
-  { id: 'messenger', name: 'Messenger', icon: '💙', color: '#0084FF', action: 'messenger' },
-  { id: 'twitter', name: 'Twitter', icon: '🐦', color: '#1DA1F2', action: 'twitter' },
-  { id: 'copy', name: 'Copy Link', icon: '📋', color: '#FF9800', action: 'copy' },
-];
-
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { theme } = useContext(ThemeContext);
   const { settings } = useSettings();
   const { profile } = useProfile();
+  const { 
+    dailyCompletion, 
+    weeklyCompletion, 
+    refreshChallengeStatus,
+  } = useGameMode();
   
   const colors = themeStyles[theme];
   
-  // Get selected category from settings (default to animals)
   const selectedCategory = (settings as any).category || DEFAULT_SETTINGS.category;
-  
-  // Get today's and this week's items based on selected category
   const todayItem = getTodayCategoryItem(selectedCategory);
   const weekItem = getWeekCategoryItem(selectedCategory);
-  
-  // Get category emoji for Quick Play
   const categoryEmoji = getCategoryEmoji(selectedCategory);
-  
-  // Get all items for preview
   const dailyItems = getDailyItemsForCategory(selectedCategory);
   const weeklyItems = getWeeklyItemsForCategory(selectedCategory);
   const dailyPreview = getDailyPreview(selectedCategory);
   const weeklyPreview = getWeeklyPreview(selectedCategory);
   
-  // State for user settings
   const [hasCustomSettings, setHasCustomSettings] = useState(false);
-  
-  // State for local storage data
   const [homeStats, setHomeStats] = useState({
     puzzlesSolved: 0,
     accuracy: 0,
@@ -241,7 +178,6 @@ const HomeScreen: React.FC = () => {
   
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   
-  // State for category fact
   const [factData, setFactData] = useState<{
     displayFact: string;
     factName: string;
@@ -259,39 +195,48 @@ const HomeScreen: React.FC = () => {
     loading: true,
   });
   
-  // State for challenge data
   const [dailyChallengeData, setDailyChallengeData] = useState({
-    remainingTime: 'Loading...',
     playerCount: 0,
     loading: true
   });
   
   const [weeklyChallengeData, setWeeklyChallengeData] = useState({
-    remainingTime: 'Loading...',
     playerCount: 0,
     loading: true
   });
 
-  // State for tracking if user played challenges
-  const [dailyPlayed, setDailyPlayed] = useState(false);
-  const [weeklyPlayed, setWeeklyPlayed] = useState(false);
-  const [dailyResult, setDailyResult] = useState<any>(null);
-  const [weeklyResult, setWeeklyResult] = useState<any>(null);
+  // State for challenge names
+  const [dailyChallengeName, setDailyChallengeName] = useState('');
+  const [weeklyChallengeName, setWeeklyChallengeName] = useState('');
 
-  // State for expiration
-  const [isDailyExpired, setIsDailyExpired] = useState(false);
-  const [forceUpdate, setForceUpdate] = useState<number>(0);
-  
   const timeUpdateRef = useRef<number | null>(null);
+  const [forceUpdate, setForceUpdate] = useState(0);
 
-  // Current settings
   const currentGridSize = settings.gridSize || DEFAULT_SETTINGS.gridSize;
   const currentDifficulty = settings.difficulty || DEFAULT_SETTINGS.difficulty;
-  const gridProperties = GRID_SIZE_PROPERTIES[currentGridSize as keyof typeof GRID_SIZE_PROPERTIES] || GRID_SIZE_PROPERTIES['8x8'];
 
-  // ======================
-  // Load stats from profile context
-  // ======================
+  // Use context for completion status
+  const dailyCompleted = dailyCompletion.completed;
+  const weeklyCompleted = weeklyCompletion.completed;
+  const dailyResultData = dailyCompletion.result;
+  const weeklyResultData = weeklyCompletion.result;
+
+  // Load challenge names from challengeService
+  const loadChallengeNames = async () => {
+    try {
+      const dailyName = await challengeService.getCurrentChallengeName('daily', currentGridSize);
+      const weeklyName = await challengeService.getCurrentChallengeName('weekly', currentGridSize);
+      
+      setDailyChallengeName(dailyName);
+      setWeeklyChallengeName(weeklyName);
+      
+      console.log('📛 Challenge names loaded:', { dailyName, weeklyName });
+    } catch (error) {
+      console.error('Error loading challenge names:', error);
+    }
+  };
+
+  // Load stats from profile
   const loadStatsFromProfile = () => {
     if (profile) {
       setHomeStats({
@@ -304,7 +249,6 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  // Load achievements from profile trophies
   const loadAchievementsFromProfile = () => {
     if (profile && profile.trophies) {
       const achievementsArray = profile.trophies.map((trophy, index) => ({
@@ -316,21 +260,17 @@ const HomeScreen: React.FC = () => {
         icon: trophy.icon,
         unlockDate: trophy.unlockDate
       }));
-      
       setAchievements(achievementsArray);
     }
   };
 
-  // Load local stats
   const loadLocalStats = async () => {
     try {
       setIsLoadingStats(true);
       loadStatsFromProfile();
       loadAchievementsFromProfile();
-      
       const user = auth.currentUser;
       const statsData = await getStatisticsData(user?.uid || null);
-      
       if (statsData?.achievements) {
         console.log('🏆 Firebase achievements data:', statsData.achievements);
       }
@@ -341,46 +281,7 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  // Load challenge played status
-  const loadChallengeStatus = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        console.log('👤 No user logged in');
-        return;
-      }
-
-      // Use UTC date for daily challenge ID with category
-      const todayId = `daily-${getUTCDateString()}-${selectedCategory}`;
-      const dailyResult = await getUserChallengeResult(user.uid, todayId);
-      
-      if (dailyResult && dailyResult.completed) {
-        setDailyPlayed(true);
-        setDailyResult(dailyResult);
-      } else {
-        setDailyPlayed(false);
-        setDailyResult(null);
-      }
-
-      // Check weekly challenge with category
-      const weekId = `weekly-${getWeekNumber(new Date())}-${selectedCategory}`;
-      const weeklyResult = await getUserChallengeResult(user.uid, weekId);
-      
-      if (weeklyResult && weeklyResult.completed) {
-        setWeeklyPlayed(true);
-        setWeeklyResult(weeklyResult);
-      } else {
-        setWeeklyPlayed(false);
-        setWeeklyResult(null);
-      }
-    } catch (error) {
-      console.error('Error loading challenge status:', error);
-    }
-  };
-
-  // ======================
-  // Load category fact from API with better fallback handling
-  // ======================
+  // Load category fact
   const loadCategoryFact = async (forceRefresh: boolean = false) => {
     setFactData(prev => ({ ...prev, loading: true }));
 
@@ -389,7 +290,6 @@ const HomeScreen: React.FC = () => {
       const storedDate = await AsyncStorage.getItem(`lastFactDate_${selectedCategory}`);
       const storedFactData = await AsyncStorage.getItem(`dailyFactData_${selectedCategory}`);
 
-      // If we have cached data from today and not forcing refresh, use it
       if (!forceRefresh && storedDate === today && storedFactData) {
         const parsedData = JSON.parse(storedFactData);
         setFactData({
@@ -400,15 +300,10 @@ const HomeScreen: React.FC = () => {
           progress: parsedData.progress || '',
           loading: false,
         });
-        console.log(`📚 Using cached fact for ${getCategoryDisplayName(selectedCategory)}`);
         return;
       }
 
-      // Try to fetch new fact from API
-      console.log(`📚 Fetching fresh fact for ${getCategoryDisplayName(selectedCategory)}...`);
       const factString = await fetchDailyCategoryFact(selectedCategory);
-      
-      // Even if factString is null, we'll create a fallback
       const categoryEmoji = getCategoryEmoji(selectedCategory);
       const categoryName = getCategoryDisplayName(selectedCategory);
       
@@ -418,12 +313,10 @@ const HomeScreen: React.FC = () => {
       let factText = '';
       
       if (!displayFact) {
-        // Create a friendly fallback fact
-        displayFact = `${categoryEmoji} ${categoryName}: Discover amazing ${categoryName.toLowerCase()} facts! Check back soon for more facts.`;
+        displayFact = `${categoryEmoji} ${categoryName}: Discover amazing ${categoryName.toLowerCase()} facts!`;
         factName = categoryName;
-        factText = `Discover amazing ${categoryName.toLowerCase()} facts! Check back soon for more facts.`;
+        factText = `Discover amazing ${categoryName.toLowerCase()} facts!`;
       } else {
-        // Extract the fact info from the formatted fact string
         const extracted = extractFactInfo(displayFact);
         factName = extracted.factName || categoryName;
         factEmoji = extracted.factEmoji || categoryEmoji;
@@ -432,62 +325,24 @@ const HomeScreen: React.FC = () => {
 
       const progress = `Daily ${categoryName} fact`;
 
-      // Store in AsyncStorage
       await AsyncStorage.setItem(`lastFactDate_${selectedCategory}`, today);
       await AsyncStorage.setItem(
         `dailyFactData_${selectedCategory}`,
-        JSON.stringify({
-          displayFact,
-          factName,
-          factEmoji,
-          factText,
-          progress,
-          fetchedAt: new Date().toISOString(),
-        })
+        JSON.stringify({ displayFact, factName, factEmoji, factText, progress })
       );
 
-      setFactData({
-        displayFact,
-        factName,
-        factEmoji,
-        factText,
-        progress,
-        loading: false,
-      });
-
-      console.log(`✅ Loaded fact for ${categoryName}: ${factName}`);
-
+      setFactData({ displayFact, factName, factEmoji, factText, progress, loading: false });
     } catch (error: any) {
       console.error('Error loading category fact:', error.message);
-
-      // Try to get cached data even if it's from a previous day
-      try {
-        const storedFactData = await AsyncStorage.getItem(`dailyFactData_${selectedCategory}`);
-        if (storedFactData) {
-          const parsedData = JSON.parse(storedFactData);
-          setFactData({
-            displayFact: parsedData.displayFact,
-            factName: parsedData.factName || getCategoryDisplayName(selectedCategory),
-            factEmoji: parsedData.factEmoji || getCategoryEmoji(selectedCategory),
-            factText: parsedData.factText || '',
-            progress: 'Using cached fact',
-            loading: false,
-          });
-          console.log(`📚 Using cached fact for ${getCategoryDisplayName(selectedCategory)} (from previous day)`);
-          return;
-        }
-      } catch {}
-
-      // Ultimate fallback - create a nice fact with emoji
       const categoryEmoji = getCategoryEmoji(selectedCategory);
       const categoryName = getCategoryDisplayName(selectedCategory);
-      const fallbackFact = `${categoryEmoji} ${categoryName}: Welcome to the ${categoryName} category! Amazing facts coming soon.`;
+      const fallbackFact = `${categoryEmoji} ${categoryName}: Amazing facts coming soon!`;
       
       setFactData({
         displayFact: fallbackFact,
         factName: categoryName,
         factEmoji: categoryEmoji,
-        factText: `Welcome to the ${categoryName} category! Amazing facts coming soon.`,
+        factText: `Amazing ${categoryName} facts coming soon!`,
         progress: 'Offline mode',
         loading: false,
         error: error.message,
@@ -495,53 +350,32 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  // Load challenge data (player counts and timers)
+  // Load challenge data (player counts)
   const loadChallengeData = async () => {
     try {
       const dailyPlayerCount = await getChallengePlayerCount('daily', selectedCategory);
-      const dailyTimeRemaining = getTimeRemaining('daily');
-      const dailyExpired = dailyTimeRemaining.includes('Expired');
-      
-      setDailyChallengeData({
-        remainingTime: dailyTimeRemaining,
-        playerCount: dailyPlayerCount,
-        loading: false
-      });
-      setIsDailyExpired(dailyExpired);
+      setDailyChallengeData({ playerCount: dailyPlayerCount, loading: false });
 
       const weeklyPlayerCount = await getChallengePlayerCount('weekly', selectedCategory);
-      const weeklyTimeRemaining = getTimeRemaining('weekly');
-      
-      setWeeklyChallengeData({
-        remainingTime: weeklyTimeRemaining,
-        playerCount: weeklyPlayerCount,
-        loading: false
-      });
+      setWeeklyChallengeData({ playerCount: weeklyPlayerCount, loading: false });
     } catch (error) {
       console.error('Error loading challenge data:', error);
-      setDailyChallengeData({
-        remainingTime: 'Error loading',
-        playerCount: 0,
-        loading: false
-      });
-      setWeeklyChallengeData({
-        remainingTime: 'Error loading',
-        playerCount: 0,
-        loading: false
-      });
+      setDailyChallengeData({ playerCount: 0, loading: false });
+      setWeeklyChallengeData({ playerCount: 0, loading: false });
     }
   };
 
-  // Refresh all data function
+  // Refresh all data
   const refreshAllData = async () => {
     console.log('🔄 Refreshing all home screen data...');
     loadStatsFromProfile();
     loadAchievementsFromProfile();
     await Promise.all([
       loadLocalStats(),
-      loadChallengeStatus(),
+      refreshChallengeStatus(selectedCategory),
       loadChallengeData(),
-      loadCategoryFact()
+      loadCategoryFact(),
+      loadChallengeNames()
     ]);
   };
 
@@ -550,7 +384,8 @@ const HomeScreen: React.FC = () => {
     loadChallengeData();
     loadCategoryFact();
     loadLocalStats();
-    loadChallengeStatus();
+    refreshChallengeStatus(selectedCategory);
+    loadChallengeNames();
     
     timeUpdateRef.current = setInterval(() => {
       setForceUpdate(prev => prev + 1);
@@ -561,60 +396,26 @@ const HomeScreen: React.FC = () => {
     }, 30000);
 
     return () => {
-      if (timeUpdateRef.current) {
-        clearInterval(timeUpdateRef.current);
-      }
+      if (timeUpdateRef.current) clearInterval(timeUpdateRef.current);
       clearInterval(dataRefreshInterval);
     };
-  }, [selectedCategory]);
+  }, [selectedCategory, currentGridSize]);
 
-  // Memoize time values to prevent blinking
-  const timeInfo = useMemo(() => {
-    const dailyRemaining = getTimeRemaining('daily');
-    const weeklyRemaining = getTimeRemaining('weekly');
-    const dailyExpired = dailyRemaining.includes('Expired');
-    const weeklyExpired = weeklyRemaining.includes('Expired');
-    
-    return {
-      dailyRemaining,
-      weeklyRemaining,
-      dailyExpired,
-      weeklyExpired,
-      dailyUrgent: isDailyChallengeUrgent(dailyRemaining),
-      weeklyUrgent: isWeeklyChallengeUrgent(weeklyRemaining)
-    };
-  }, [forceUpdate]);
-
-  // Update dailyChallengeData when memoized values change
-  useEffect(() => {
-    setDailyChallengeData(prev => ({
-      ...prev,
-      remainingTime: timeInfo.dailyRemaining
-    }));
-    setIsDailyExpired(timeInfo.dailyExpired);
-    
-    setWeeklyChallengeData(prev => ({
-      ...prev,
-      remainingTime: timeInfo.weeklyRemaining
-    }));
-  }, [timeInfo]);
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🏠 HomeScreen focused, refreshing...');
+      refreshAllData();
+      return () => {};
+    }, [selectedCategory, currentGridSize])
+  );
 
   // Reload stats when profile changes
   useEffect(() => {
     loadStatsFromProfile();
     loadAchievementsFromProfile();
     loadLocalStats();
-    loadChallengeStatus();
   }, [profile]);
-
-  // Add focus listener
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      refreshAllData();
-    });
-
-    return unsubscribe;
-  }, [navigation, profile, selectedCategory]);
 
   // Check user settings on mount
   useEffect(() => {
@@ -626,11 +427,9 @@ const HomeScreen: React.FC = () => {
         console.error('Error checking settings:', error);
       }
     };
-    
     checkUserSettings();
   }, []);
 
-  // Helper to get contrasting text color
   const getContrastColor = (bgColor: string): string => {
     const hex = bgColor.replace('#', '');
     const r = parseInt(hex.substr(0, 2), 16);
@@ -640,99 +439,135 @@ const HomeScreen: React.FC = () => {
     return luminance > 0.5 ? '#000000' : '#ffffff';
   };
 
-  // ======================
-  // SHARE FUNCTIONALITY
-  // ======================
-  
-  const appDownloadUrl = 'https://example.com/download'; // Replace with actual app store link
-  const shareMessage = `🧩 Join me on this awesome puzzle app! Solve daily & weekly challenges with fun categories like Animals, Cars, Sports and more! Download now: ${appDownloadUrl}`;
-  
-  const handleShare = async (option: typeof SHARE_OPTIONS[0]) => {
-    try {
-      switch (option.action) {
-        case 'native':
-          await Share.share({
-            message: shareMessage,
-            title: 'Join me on Puzzle App!',
-          });
-          break;
-          
-        case 'whatsapp':
-          const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-          const canOpenWhatsapp = await Linking.canOpenURL(whatsappUrl);
-          if (canOpenWhatsapp) {
-            await Linking.openURL(whatsappUrl);
-          } else {
-            Alert.alert('WhatsApp not installed', 'Please install WhatsApp to share.');
-          }
-          break;
-          
-        case 'telegram':
-          const telegramUrl = `tg://msg?text=${encodeURIComponent(shareMessage)}`;
-          const canOpenTelegram = await Linking.canOpenURL(telegramUrl);
-          if (canOpenTelegram) {
-            await Linking.openURL(telegramUrl);
-          } else {
-            Alert.alert('Telegram not installed', 'Please install Telegram to share.');
-          }
-          break;
-          
-        case 'messenger':
-          const messengerUrl = `fb-messenger://share?link=${encodeURIComponent(appDownloadUrl)}`;
-          const canOpenMessenger = await Linking.canOpenURL(messengerUrl);
-          if (canOpenMessenger) {
-            await Linking.openURL(messengerUrl);
-          } else {
-            Alert.alert('Messenger not installed', 'Please install Messenger to share.');
-          }
-          break;
-          
-        case 'twitter':
-          const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareMessage)}`;
-          await Linking.openURL(twitterUrl);
-          break;
-          
-        case 'copy':
-          await AsyncStorage.setItem('shareLink', appDownloadUrl);
-          await Share.share({
-            message: shareMessage,
-          });
-          break;
-          
-        default:
-          await Share.share({
-            message: shareMessage,
-            title: 'Join me on Puzzle App!',
-          });
-      }
-      
-      console.log(`📱 Shared via ${option.name}`);
-    } catch (error) {
-      console.error('Error sharing:', error);
-      Alert.alert('Share Failed', 'Could not share. Please try again.');
-    }
-  };
-  
-  const showShareOptions = () => {
-    Alert.alert(
-      'Invite Friends',
-      'Share this app with friends!',
-      [
-        ...SHARE_OPTIONS.map(option => ({
-          text: `${option.icon} ${option.name}`,
-          onPress: () => handleShare(option),
-        })),
-        { text: 'Cancel', style: 'cancel' },
-      ],
-      { cancelable: true }
-    );
+  // Get remaining time for daily challenge
+  const getDailyRemainingTime = () => {
+    const now = new Date();
+    const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+    const diff = utcMidnight.getTime() - now.getTime();
+    if (diff <= 0) return 'Expired';
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
   };
 
-  // Smart greeting logic with pluralization
+  // Get remaining time for weekly challenge
+  const getWeeklyRemainingTime = () => {
+    const now = new Date();
+    const currentDay = now.getUTCDay();
+    let daysUntilMonday = currentDay === 1 ? 7 : (8 - currentDay) % 7;
+    if (daysUntilMonday === 0) daysUntilMonday = 7;
+    const nextMonday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday, 0, 0, 0));
+    const diff = nextMonday.getTime() - now.getTime();
+    if (diff <= 0) return 'Expired';
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    return `${days}d ${hours}h`;
+  };
+
+  const dailyRemaining = getDailyRemainingTime();
+  const weeklyRemaining = getWeeklyRemainingTime();
+  const isDailyExpired = dailyRemaining === 'Expired';
+  const isWeeklyExpired = weeklyRemaining === 'Expired';
+
+  // Button text based on completion status
+  const getDailyButtonText = () => {
+    if (dailyCompleted) return 'VIEW RESULTS';
+    if (isDailyExpired) return 'DAILY CHALLENGE EXPIRED';
+    return 'PLAY DAILY CHALLENGE';
+  };
+
+  const getDailyButtonColor = () => {
+    if (dailyCompleted) return '#9C27B0';
+    if (isDailyExpired) return '#757575';
+    return '#2E7D32';
+  };
+
+  const getWeeklyButtonText = () => {
+    if (weeklyCompleted) return 'VIEW RESULTS';
+    if (isWeeklyExpired) return 'WEEKLY CHALLENGE EXPIRED';
+    return 'PLAY WEEKLY CHALLENGE';
+  };
+
+  const getWeeklyButtonColor = () => {
+    if (weeklyCompleted) return '#9C27B0';
+    if (isWeeklyExpired) return '#757575';
+    return '#2E7D32';
+  };
+
+  // Navigation handlers
+  const handleDailyChallengePress = () => {
+    if (dailyCompleted) {
+      navigation.navigate('ChallengeResults', {
+        challengeId: `daily-${getUTCDateString()}-${selectedCategory}`,
+        challengeType: 'daily',
+        time: dailyResultData?.bestTime,
+        isPerfect: dailyResultData?.isPerfect,
+        moves: dailyResultData?.moves,
+        correctMoves: dailyResultData?.correctMoves,
+        wrongMoves: dailyResultData?.wrongMoves,
+        accuracy: dailyResultData?.accuracy,
+        completed: true,
+        category: selectedCategory,
+      } as any);
+      return;
+    }
+    
+    if (isDailyExpired) {
+      Alert.alert('Challenge Expired', 'This daily challenge has expired. Check back tomorrow!');
+      return;
+    }
+    
+    goToPlay(navigation, 'daily', {
+      gridSize: currentGridSize,
+      difficulty: currentDifficulty,
+      category: selectedCategory
+    });
+  };
+
+  const handleWeeklyChallengePress = () => {
+    if (weeklyCompleted) {
+      navigation.navigate('ChallengeResults', {
+        challengeId: `weekly-${getWeekNumber(new Date())}-${selectedCategory}`,
+        challengeType: 'weekly',
+        time: weeklyResultData?.bestTime,
+        isPerfect: weeklyResultData?.isPerfect,
+        moves: weeklyResultData?.moves,
+        correctMoves: weeklyResultData?.correctMoves,
+        wrongMoves: weeklyResultData?.wrongMoves,
+        accuracy: weeklyResultData?.accuracy,
+        completed: true,
+        category: selectedCategory,
+      } as any);
+      return;
+    }
+    
+    if (isWeeklyExpired) {
+      Alert.alert('Challenge Expired', 'This weekly challenge has expired. Check back next week!');
+      return;
+    }
+    
+    goToPlay(navigation, 'weekly', {
+      gridSize: currentGridSize,
+      difficulty: currentDifficulty,
+      category: selectedCategory
+    });
+  };
+
+  const handleQuickPlayPress = () => {
+    goToPlay(navigation, 'sequential', {
+      gridSize: currentGridSize,
+      difficulty: currentDifficulty,
+      category: selectedCategory
+    });
+  };
+
+  const handleRefreshFact = async () => {
+    await loadCategoryFact(true);
+  };
+
   const getGreeting = () => {
     const hour = new Date().getHours();
     let timeGreeting = '';
-
     if (hour < 12) timeGreeting = 'Good morning';
     else if (hour < 18) timeGreeting = 'Good afternoon';
     else timeGreeting = 'Good evening';
@@ -746,153 +581,51 @@ const HomeScreen: React.FC = () => {
     if (puzzlesSolved > 0) {
       const gameText = pluralize(puzzlesSolved, 'game', 'games');
       const streakText = pluralize(currentStreak, 'day', 'days');
-      
       subtitle += ` • Played ${puzzlesSolved} ${gameText}`;
-      if (currentStreak > 0) {
-        subtitle += `, ${currentStreak} ${streakText}`;
-      }
+      if (currentStreak > 0) subtitle += `, ${currentStreak} ${streakText}`;
     }
-
-    const showSettingsPrompt = !hasCustomSettings;
-    const showProfilePrompt = !profile?.name;
-
-    const settingsPromptText = 'Customize your settings';
-    const profilePromptText = 'Create a profile to save your progress';
 
     return {
       greeting: `${timeGreeting}, ${firstName}! 👋`,
       subtitle,
-      showSettingsPrompt,
-      showProfilePrompt,
-      settingsPromptText,
-      profilePromptText,
+      showSettingsPrompt: !hasCustomSettings,
+      showProfilePrompt: !profile?.name,
+      settingsPromptText: 'Customize your settings',
+      profilePromptText: 'Create a profile to save your progress',
     };
   };
 
   const greetingData = getGreeting();
-  
-  // Button text and color functions
-  const getDailyButtonText = () => {
-    if (timeInfo.dailyExpired) {
-      return 'PLAY DAILY CHALLENGE';
-    }
-    if (dailyPlayed) {
-      return 'SEE DAILY CHALLENGE RESULTS';
-    }
-    return 'PLAY DAILY CHALLENGE';
-  };
 
-  const getDailyButtonColor = () => {
-    if (timeInfo.dailyExpired || !dailyPlayed) {
-      return '#2E7D32';
-    }
-    return '#9C27B0';
-  };
-
-  // Navigation handlers
-  const handleDailyChallengePress = () => {
-    if (timeInfo.dailyExpired || !dailyPlayed) {
-      goToPlay(navigation, 'daily', {
-        gridSize: currentGridSize,
-        difficulty: currentDifficulty,
-        category: selectedCategory
-      });
-    } else {
-      navigation.navigate('ChallengeResults', {
-        challengeId: `daily-${getUTCDateString()}-${selectedCategory}`,
-        challengeType: 'daily',
-        time: dailyResult?.bestTime,
-        isPerfect: dailyResult?.isPerfect,
-        moves: dailyResult?.moves,
-        correctMoves: dailyResult?.correctMoves,
-        wrongMoves: dailyResult?.wrongMoves,
-        accuracy: dailyResult?.accuracy,
-        completed: true,
-        category: selectedCategory,
-      } as any);
-    }
-  };
-
-  const handleWeeklyChallengePress = () => {
-    if (weeklyPlayed) {
-      navigation.navigate('ChallengeResults', {
-        challengeId: `weekly-${getWeekNumber(new Date())}-${selectedCategory}`,
-        challengeType: 'weekly',
-        time: weeklyResult?.bestTime,
-        isPerfect: weeklyResult?.isPerfect,
-        moves: weeklyResult?.moves,
-        correctMoves: weeklyResult?.correctMoves,
-        wrongMoves: weeklyResult?.wrongMoves,
-        accuracy: weeklyResult?.accuracy,
-        completed: true,
-        category: selectedCategory,
-      } as any);
-    } else {
-      goToPlay(navigation, 'weekly', {
-        gridSize: currentGridSize,
-        difficulty: currentDifficulty,
-        category: selectedCategory
-      });
-    }
-  };
-
-  const handleQuickPlayPress = () => {
-    goToPlay(navigation, 'sequential', {
-      gridSize: currentGridSize,
-      difficulty: currentDifficulty,
-      category: selectedCategory
-    });
-  };
-
-  // Get weekly button text
-  const getWeeklyButtonText = () => {
-    if (weeklyPlayed) return 'SEE WEEKLY CHALLENGE RESULTS';
-    return 'PLAY WEEKLY CHALLENGE';
-  };
-
-  // Refresh fact manually
-  const handleRefreshFact = async () => {
-    console.log(`🔄 Manually refreshing fact for ${getCategoryDisplayName(selectedCategory)}`);
-    await loadCategoryFact(true);
-  };
-
-  // Helper to safely render text
-  const renderSafeText = (text: string | number | undefined | null, fallback: string = '') => {
-    const safeText = text ?? fallback;
-    return String(safeText);
-  };
-
-  // Challenge data with category items
   const dailyChallenge = {
-    title: `Daily ${todayItem.name} Adventure`,
+    title: dailyChallengeName || `Daily ${todayItem.name} Adventure`,
     description: `Complete today's special ${currentGridSize} puzzle featuring ${todayItem.name.toLowerCase()}`,
-    remainingTime: timeInfo.dailyRemaining,
+    remainingTime: dailyRemaining,
     players: dailyChallengeData.playerCount.toLocaleString(),
     emoji: todayItem.emoji,
     itemName: todayItem.name,
     category: getCategoryDisplayName(selectedCategory),
     loading: dailyChallengeData.loading,
-    isUrgent: timeInfo.dailyUrgent,
-    played: dailyPlayed && !timeInfo.dailyExpired,
-    result: dailyResult,
-    isExpired: timeInfo.dailyExpired,
+    isUrgent: !isDailyExpired && dailyRemaining.includes('h') && parseInt(dailyRemaining) < 2,
+    played: dailyCompleted && !isDailyExpired,
+    result: dailyResultData,
+    isExpired: isDailyExpired,
   };
   
   const weeklyChallenge = {
-    title: `Weekly ${weekItem.name} Expedition`,
+    title: weeklyChallengeName || `Weekly ${weekItem.name} Expedition`,
     description: `A special ${currentGridSize} ${weekItem.name.toLowerCase()} puzzle available all week`,
-    remainingTime: timeInfo.weeklyRemaining,
+    remainingTime: weeklyRemaining,
     players: weeklyChallengeData.playerCount.toLocaleString(),
     emoji: weekItem.emoji,
     itemName: weekItem.name,
     category: getCategoryDisplayName(selectedCategory),
     loading: weeklyChallengeData.loading || isLoadingStats,
-    isUrgent: timeInfo.weeklyUrgent,
-    played: weeklyPlayed,
-    result: weeklyResult,
+    isUrgent: !isWeeklyExpired && weeklyRemaining.includes('d') && parseInt(weeklyRemaining) === 1,
+    played: weeklyCompleted && !isWeeklyExpired,
+    result: weeklyResultData,
   };
 
-  // Category rotation preview
   const categoryPreview = {
     daily: dailyPreview.slice(0, 3),
     weekly: weeklyPreview.slice(0, 3),
@@ -900,23 +633,49 @@ const HomeScreen: React.FC = () => {
     totalWeekly: weeklyItems.length,
   };
 
+  const userId = auth.currentUser?.uid || 'player123';
+  const userName = profile?.name?.split(' ')[0] || 'A Player';
+
+  // Debug function
+  const debugStatus = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Debug', 'No user logged in');
+      return;
+    }
+    
+    Alert.alert(
+      'Challenge Status',
+      `📅 Daily: ${dailyCompleted ? '✅ Completed' : '❌ Not completed'}\n` +
+      `   Name: ${dailyChallengeName}\n` +
+      `   Time: ${dailyResultData?.bestTime || 'N/A'}s\n\n` +
+      `📆 Weekly: ${weeklyCompleted ? '✅ Completed' : '❌ Not completed'}\n` +
+      `   Name: ${weeklyChallengeName}\n` +
+      `   Time: ${weeklyResultData?.bestTime || 'N/A'}s`
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <GreetingHeader
-          greeting={greetingData.greeting}
-          subtitle={greetingData.subtitle}
-          showSettingsPrompt={greetingData.showSettingsPrompt}
-          showProfilePrompt={greetingData.showProfilePrompt}
-          settingsPromptText={greetingData.settingsPromptText}
-          profilePromptText={greetingData.profilePromptText}
-          themeColors={colors}
-          onSettingsPress={() => navigation.navigate('Settings')}
-          onProfilePress={() => navigation.navigate('Profile')}
-        />
+        {/* Header with Debug Button */}
+        <View style={styles.headerRow}>
+          <GreetingHeader
+            greeting={greetingData.greeting}
+            subtitle={greetingData.subtitle}
+            showSettingsPrompt={greetingData.showSettingsPrompt}
+            showProfilePrompt={greetingData.showProfilePrompt}
+            settingsPromptText={greetingData.settingsPromptText}
+            profilePromptText={greetingData.profilePromptText}
+            themeColors={colors}
+            onSettingsPress={() => navigation.navigate('Settings')}
+            onProfilePress={() => navigation.navigate('Profile')}
+          />
+          <TouchableOpacity onPress={debugStatus} style={styles.debugButton}>
+            <Text style={{ color: colors.text, fontSize: 20 }}>🐛</Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* Category Badge */}
         <View style={styles.categoryBadgeContainer}>
           <Text style={[styles.categoryBadge, { 
             backgroundColor: colors.button,
@@ -927,9 +686,7 @@ const HomeScreen: React.FC = () => {
         </View>
 
         {/* Daily Challenge */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Daily Challenge
-        </Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Daily Challenge</Text>
         <ChallengeCard
           type="daily"
           title={dailyChallenge.title}
@@ -942,17 +699,15 @@ const HomeScreen: React.FC = () => {
           isLoading={dailyChallenge.loading}
           onPress={handleDailyChallengePress}
           onPlayPress={handleDailyChallengePress}
-          played={dailyPlayed && !timeInfo.dailyExpired}
-          result={dailyResult}
+          played={dailyCompleted && !isDailyExpired}
+          result={dailyResultData}
           buttonText={getDailyButtonText()}
           buttonColor={getDailyButtonColor()}
         />
 
         {/* Daily Preview */}
         <View style={[styles.previewContainer, { backgroundColor: `${colors.button}10` }]}>
-          <Text style={[styles.previewTitle, { color: colors.text }]}>
-            Coming up this week:
-          </Text>
+          <Text style={[styles.previewTitle, { color: colors.text }]}>Coming up this week:</Text>
           <View style={styles.previewItems}>
             {categoryPreview.daily.map((item, index) => (
               <View key={index} style={styles.previewItem}>
@@ -964,9 +719,7 @@ const HomeScreen: React.FC = () => {
         </View>
 
         {/* Weekly Challenge */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Weekly Challenge
-        </Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Weekly Challenge</Text>
         <ChallengeCard
           type="weekly"
           title={weeklyChallenge.title}
@@ -979,16 +732,15 @@ const HomeScreen: React.FC = () => {
           isLoading={weeklyChallenge.loading}
           onPress={handleWeeklyChallengePress}
           onPlayPress={handleWeeklyChallengePress}
-          played={weeklyPlayed}
-          result={weeklyResult}
+          played={weeklyCompleted && !isWeeklyExpired}
+          result={weeklyResultData}
           buttonText={getWeeklyButtonText()}
+          buttonColor={getWeeklyButtonColor()}
         />
 
         {/* Weekly Preview */}
         <View style={[styles.previewContainer, { backgroundColor: `${colors.button}10` }]}>
-          <Text style={[styles.previewTitle, { color: colors.text }]}>
-            Coming up this month:
-          </Text>
+          <Text style={[styles.previewTitle, { color: colors.text }]}>Coming up this month:</Text>
           <View style={styles.previewItems}>
             {categoryPreview.weekly.map((item, index) => (
               <View key={index} style={styles.previewItem}>
@@ -999,10 +751,8 @@ const HomeScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Quick Play - UPDATED with category emoji */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Quick Play
-        </Text>
+        {/* Quick Play */}
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Play</Text>
         <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
           {hasCustomSettings 
             ? `Your preferred settings: ${currentGridSize} • ${currentDifficulty} • ${getCategoryDisplayName(selectedCategory)}`
@@ -1020,27 +770,20 @@ const HomeScreen: React.FC = () => {
           onPress={handleQuickPlayPress}
         />
 
-        {/* Settings Link */}
         <SettingsLink
           hasCustomSettings={hasCustomSettings}
           themeColors={colors}
           onPress={() => navigation.navigate('Settings')}
         />
 
-        {/* Daily Category Fact Section - UPDATED with fact name and emoji on right */}
+        {/* Daily Fact */}
         <View style={styles.factSectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]}>
             📚 Daily {getCategoryDisplayName(selectedCategory)} Fact
           </Text>
           {factData.factName && !factData.loading && factData.factEmoji && (
-            <View style={[styles.factNameBadge, { 
-              backgroundColor: colors.button,
-            }]}>
-              <Text 
-                style={[styles.factNameText, { color: getContrastColor(colors.button) }]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
+            <View style={[styles.factNameBadge, { backgroundColor: colors.button }]}>
+              <Text style={[styles.factNameText, { color: getContrastColor(colors.button) }]} numberOfLines={1}>
                 {factData.factEmoji} {factData.factName}
               </Text>
             </View>
@@ -1055,13 +798,8 @@ const HomeScreen: React.FC = () => {
         />
 
         {/* Achievements */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Achievements
-        </Text>
-        <AchievementsList
-          trophies={achievements}
-          themeColors={colors}
-        />
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Achievements</Text>
+        <AchievementsList trophies={achievements} themeColors={colors} />
 
         {/* Stats Summary */}
         <StatsSummary
@@ -1074,111 +812,16 @@ const HomeScreen: React.FC = () => {
           themeColors={colors}
         />
 
-        {/* Challenge Status Summary */}
-        <View style={[styles.statusSummary, { backgroundColor: `${colors.button}20` }]}>
-          <Text style={[styles.statusTitle, { color: colors.text }]}>
-            📊 Live Challenge Status
-          </Text>
-          <View style={styles.statusGrid}>
-            <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>
-                Daily Players
-              </Text>
-              <View>
-                <Text style={[styles.statusValue, { color: colors.text }]}>
-                  {dailyChallenge.loading ? '...' : dailyChallenge.players}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>
-                Weekly Players
-              </Text>
-              <View>
-                <Text style={[styles.statusValue, { color: colors.text }]}>
-                  {weeklyChallenge.loading ? '...' : weeklyChallenge.players}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>
-                Daily Ends In
-              </Text>
-              <View>
-                <Text style={[
-                  styles.timerValue, 
-                  { 
-                    color: dailyChallenge.isUrgent ? '#FF5722' : colors.text,
-                    fontWeight: dailyChallenge.isUrgent ? 'bold' : 'normal'
-                  }
-                ]}>
-                  {dailyChallenge.remainingTime}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.statusItem}>
-              <Text style={[styles.statusLabel, { color: colors.text }]}>
-                Weekly Ends In
-              </Text>
-              <View>
-                <Text style={[
-                  styles.timerValue, 
-                  { 
-                    color: weeklyChallenge.isUrgent ? '#FF5722' : colors.text,
-                    fontWeight: weeklyChallenge.isUrgent ? 'bold' : 'normal'
-                  }
-                ]}>
-                  {weeklyChallenge.remainingTime}
-                </Text>
-              </View>
-            </View>
-          </View>
-          <View>
-            <Text style={[styles.statusNote, { color: colors.text, opacity: 0.7 }]}>
-              Updates every second • UTC-based timing
-            </Text>
-          </View>
-        </View>
+        {/* Share Invite */}
+        <ShareInvite
+          themeColors={colors}
+          userId={userId}
+          userName={userName}
+          variant="card"
+          challengeName={dailyChallengeName}
+          challengeType="daily"
+        />
 
-        {/* Share App Section */}
-        <View style={styles.shareSection}>
-          <Text style={[styles.shareTitle, { color: colors.text }]}>
-            📱 Invite Friends
-          </Text>
-          <Text style={[styles.shareSubtitle, { color: colors.text, opacity: 0.7 }]}>
-            Share the fun! Invite friends to play with you
-          </Text>
-          
-          <TouchableOpacity 
-            style={[styles.shareMainButton, { backgroundColor: colors.button }]}
-            onPress={showShareOptions}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.shareMainButtonText, { color: getContrastColor(colors.button) }]}>
-              📤 Share App
-            </Text>
-          </TouchableOpacity>
-          
-          <View style={styles.shareOptionsGrid}>
-            {SHARE_OPTIONS.map(option => (
-              <TouchableOpacity
-                key={option.id}
-                style={[styles.shareOption, { backgroundColor: `${colors.button}15` }]}
-                onPress={() => handleShare(option)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.shareOptionIcon, { color: option.color }]}>
-                  {option.icon}
-                </Text>
-                <Text style={[styles.shareOptionText, { color: colors.text }]}>
-                  {option.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Footer */}
         <AppFooter textColor={colors.text} version="1.0.0" />
       </ScrollView>
     </SafeAreaView>
@@ -1186,173 +829,23 @@ const HomeScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginHorizontal: 20,
-    marginTop: 25,
-    marginBottom: 10,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    marginHorizontal: 20,
-    marginBottom: 15,
-    opacity: 0.8,
-  },
-  factSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginHorizontal: 20,
-    marginTop: 25,
-    marginBottom: 10,
-    flexWrap: 'nowrap',
-  },
-  factNameBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    overflow: 'hidden',
-    maxWidth: '50%', 
-    flexShrink: 1,
-  },
-  factNameText: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  categoryBadgeContainer: {
-    marginHorizontal: 20,
-    marginBottom: 10,
-  },
-  categoryBadge: {
-    fontSize: 14,
-    fontWeight: '600',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    overflow: 'hidden',
-    alignSelf: 'flex-start',
-  },
-  previewContainer: {
-    marginHorizontal: 20,
-    marginTop: 10,
-    marginBottom: 20,
-    padding: 15,
-    borderRadius: 12,
-  },
-  previewTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 10,
-    opacity: 0.8,
-  },
-  previewItems: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  previewItem: {
-    alignItems: 'center',
-  },
-  previewEmoji: {
-    fontSize: 24,
-    marginBottom: 4,
-  },
-  previewDay: {
-    fontSize: 12,
-    opacity: 0.7,
-  },
-  previewWeek: {
-    fontSize: 12,
-    opacity: 0.7,
-  },
-  statusSummary: {
-    marginHorizontal: 20,
-    marginVertical: 15,
-    padding: 20,
-    borderRadius: 15,
-  },
-  statusTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-  },
-  statusGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  statusItem: {
-    width: '48%',
-    marginBottom: 15,
-  },
-  statusLabel: {
-    fontSize: 12,
-    opacity: 0.7,
-    marginBottom: 5,
-  },
-  statusValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  timerValue: {
-    fontSize: 18,
-  },
-  statusNote: {
-    fontSize: 10,
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  shareSection: {
-    marginHorizontal: 20,
-    marginVertical: 20,
-    padding: 16,
-    borderRadius: 16,
-  },
-  shareTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  shareSubtitle: {
-    fontSize: 14,
-    marginBottom: 16,
-  },
-  shareMainButton: {
-    paddingVertical: 14,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  shareMainButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  shareOptionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  shareOption: {
-    width: '30%',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  shareOptionIcon: {
-    fontSize: 24,
-    marginBottom: 6,
-  },
-  shareOptionText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
+  container: { flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 16 },
+  debugButton: { padding: 8, marginRight: 8, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.05)' },
+  sectionTitle: { fontSize: 20, fontWeight: 'bold', marginHorizontal: 20, marginTop: 25, marginBottom: 10 },
+  sectionSubtitle: { fontSize: 14, marginHorizontal: 20, marginBottom: 15, opacity: 0.8 },
+  factSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 20, marginTop: 25, marginBottom: 10 },
+  factNameBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, maxWidth: '50%' },
+  factNameText: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  categoryBadgeContainer: { marginHorizontal: 20, marginBottom: 10 },
+  categoryBadge: { fontSize: 14, fontWeight: '600', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start' },
+  previewContainer: { marginHorizontal: 20, marginTop: 10, marginBottom: 20, padding: 15, borderRadius: 12 },
+  previewTitle: { fontSize: 14, fontWeight: '600', marginBottom: 10, opacity: 0.8 },
+  previewItems: { flexDirection: 'row', justifyContent: 'space-around' },
+  previewItem: { alignItems: 'center' },
+  previewEmoji: { fontSize: 24, marginBottom: 4 },
+  previewDay: { fontSize: 12, opacity: 0.7 },
+  previewWeek: { fontSize: 12, opacity: 0.7 },
 });
 
 export default HomeScreen;
