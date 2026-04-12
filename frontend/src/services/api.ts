@@ -2,6 +2,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCategoryEmoji, getCategoryDisplayName } from '../utils/categoryHelpers';
+import { getUTCDateString, getWeekNumber } from '../utils/timeUtils';
 
 // ============================
 // TYPES
@@ -43,10 +44,7 @@ export interface Fact {
 // ============================
 // BASE URL - Your Backend Server
 // ============================
-// For development (change to your actual IP for physical device testing)
 const BASE_URL = 'http://localhost:3000';
-// For production, you would use:
-// const BASE_URL = 'https://your-production-server.com';
 
 // ============================
 // AXIOS CONFIG
@@ -178,7 +176,6 @@ async function getPuzzleFromRepo(
   console.log('Difficulty:', difficulty);
   
   try {
-    // Call your backend server instead of GitHub directly
     const url = `${BASE_URL}/puzzle/${category}/${size}/${difficultyFolder}`;
     console.log('Fetching from backend:', url);
     
@@ -218,15 +215,17 @@ export async function fetchSequentialPuzzle(
 }
 
 // ============================
-// 2️⃣ DAILY CHALLENGE
+// 2️⃣ DAILY CHALLENGE - WITH UTC DATE
 // ============================
 export async function fetchDailyChallenge(
   category: Category = 'animals',
   size: number
 ): Promise<PuzzleResponse | null> {
-  console.log('📅 fetchDailyChallenge - Called with:', { category, size });
+  const utcDate = getUTCDateString();
+  console.log('📅 fetchDailyChallenge - UTC Date:', utcDate, { category, size });
+  
   try {
-    const url = `${BASE_URL}/daily/${category}/${size}`;
+    const url = `${BASE_URL}/daily/${category}/${size}?date=${utcDate}`;
     console.log('Fetching daily challenge from:', url);
     
     const puzzle = await loadJson<PuzzleResponse>(url);
@@ -235,24 +234,26 @@ export async function fetchDailyChallenge(
       throw new Error('No daily puzzle returned');
     }
     
-    console.log('✅ Daily puzzle loaded, ID:', puzzle.id);
+    console.log('✅ Daily puzzle loaded, ID:', puzzle.id, 'for UTC date:', utcDate);
     return { ...puzzle, category };
   } catch (err) {
-    console.error('❌ Daily fetch failed:', err);
+    console.error('❌ Daily fetch failed for UTC date:', utcDate, err);
     return null;
   }
 }
 
 // ============================
-// 3️⃣ WEEKLY CHALLENGE
+// 3️⃣ WEEKLY CHALLENGE - WITH UTC WEEK
 // ============================
 export async function fetchWeeklyChallenge(
   category: Category = 'animals',
   size: number
 ): Promise<PuzzleResponse | null> {
-  console.log('📆 fetchWeeklyChallenge - Called with:', { category, size });
+  const utcWeekNumber = getWeekNumber(new Date());
+  console.log('📆 fetchWeeklyChallenge - UTC Week:', utcWeekNumber, { category, size });
+  
   try {
-    const url = `${BASE_URL}/weekly/${category}/${size}`;
+    const url = `${BASE_URL}/weekly/${category}/${size}?week=${utcWeekNumber}`;
     console.log('Fetching weekly challenge from:', url);
     
     const puzzle = await loadJson<PuzzleResponse>(url);
@@ -261,10 +262,10 @@ export async function fetchWeeklyChallenge(
       throw new Error('No weekly puzzle returned');
     }
     
-    console.log('✅ Weekly puzzle loaded, ID:', puzzle.id);
+    console.log('✅ Weekly puzzle loaded, ID:', puzzle.id, 'for UTC week:', utcWeekNumber);
     return { ...puzzle, category };
   } catch (err) {
-    console.error('❌ Weekly fetch failed:', err);
+    console.error('❌ Weekly fetch failed for UTC week:', utcWeekNumber, err);
     return null;
   }
 }
@@ -276,7 +277,6 @@ let factsCache: Record<string, CategoryFact[]> = {};
 
 export async function fetchCategoryFacts(category: Category): Promise<CategoryFact[] | null> {
   try {
-    // Check cache first
     if (factsCache[category]) {
       console.log(`📚 Returning cached facts for ${category}`);
       return factsCache[category];
@@ -324,7 +324,6 @@ export async function fetchDailyCategoryFact(category: Category = 'animals'): Pr
     const factItem = facts[currentIndex.itemIdx % facts.length];
     const fact = factItem.facts[currentIndex.factIdx % factItem.facts.length];
 
-    // Update index for next time
     currentIndex.itemIdx++;
     if (currentIndex.itemIdx >= facts.length) {
       currentIndex.itemIdx = 0;

@@ -1,3 +1,5 @@
+// server.js or index.ts - UPDATED WITH UTC SUPPORT
+
 import express from "express";
 import axios from "axios";
 import cors from "cors";
@@ -36,6 +38,65 @@ console.log("🔐 GitHub Token configured:", GITHUB_TOKEN ? "Yes ✅" : "No ❌"
 console.log("📡 Using GitHub Raw URL:", GITHUB_RAW_URL);
 
 // =========================
+// UTC Helper Functions
+// =========================
+
+/**
+ * Get UTC date string in YYYY-MM-DD format
+ */
+function getUTCDateString(date: Date = new Date()): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Get UTC day of year (1-366)
+ */
+function getUTCDayOfYear(date: Date = new Date()): number {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 0));
+  const diff = date.getTime() - start.getTime();
+  const oneDay = 86400000;
+  return Math.floor(diff / oneDay);
+}
+
+/**
+ * Get UTC week number (1-53)
+ */
+function getUTCWeekNumber(date: Date = new Date()): number {
+  const utcDate = new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate()
+  ));
+  
+  const firstDayOfYear = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+  const pastDaysOfYear = (utcDate.getTime() - firstDayOfYear.getTime()) / 86400000;
+  const weekNumber = Math.ceil((pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7);
+  
+  return weekNumber;
+}
+
+/**
+ * Get deterministic file number based on UTC date
+ */
+function getDailyFileNumber(date: Date = new Date()): number {
+  const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const dayOfYear = getUTCDayOfYear(date);
+  return fileNumbers[dayOfYear % fileNumbers.length];
+}
+
+/**
+ * Get deterministic file number based on UTC week
+ */
+function getWeeklyFileNumber(date: Date = new Date()): number {
+  const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const weekNumber = getUTCWeekNumber(date);
+  return fileNumbers[weekNumber % fileNumbers.length];
+}
+
+// =========================
 // Helper to fetch JSON with token
 // =========================
 async function fetchJson<T>(url: string): Promise<T | null> {
@@ -44,21 +105,14 @@ async function fetchJson<T>(url: string): Promise<T | null> {
     const headers: any = { "Accept": "application/json" };
     if (GITHUB_TOKEN) {
       headers["Authorization"] = `token ${GITHUB_TOKEN}`;
-      console.log(`🔑 Using token: ${GITHUB_TOKEN.substring(0, 10)}...`);
     }
     const resp = await axios.get<T>(url, { headers });
-    console.log(`✅ Success! Status: ${resp.status}, Data length: ${JSON.stringify(resp.data).length}`);
+    console.log(`✅ Success! Status: ${resp.status}`);
     return resp.data;
   } catch (err: any) {
     console.error(`❌ Failed to fetch: ${url}`);
     console.error(`   Status: ${err?.response?.status}`);
     console.error(`   Message: ${err?.message}`);
-    if (err?.response?.status === 404) {
-      console.error(`   File not found! Check if the path is correct.`);
-    }
-    if (err?.response?.status === 401) {
-      console.error(`   Unauthorized! Check your GitHub token.`);
-    }
     return null;
   }
 }
@@ -69,7 +123,6 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 app.get("/test-github", async (req, res) => {
   console.log("🧪 Testing GitHub access...");
   
-  // Test with a known good file (if your repo has animals/5/easy/easy_5_1.json)
   const testUrl = `${GITHUB_RAW_URL}/animals/5/easy/easy_5_1.json`;
   const result = await fetchJson<any>(testUrl);
   
@@ -92,7 +145,7 @@ app.get("/test", (req, res) => {
 });
 
 // =========================
-// Get Random Puzzle - WITH DEBUGGING
+// Get Random Puzzle
 // =========================
 app.get("/puzzle/:category/:size/:difficulty", async (req, res) => {
   const { category, size, difficulty } = req.params;
@@ -103,7 +156,6 @@ app.get("/puzzle/:category/:size/:difficulty", async (req, res) => {
     const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const randomFileNum = fileNumbers[Math.floor(Math.random() * fileNumbers.length)];
     
-    // Construct the URL exactly as it should be
     const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${randomFileNum}.json`;
     console.log(`📂 Attempting to fetch: ${url}`);
     
@@ -130,21 +182,31 @@ app.get("/puzzle/:category/:size/:difficulty", async (req, res) => {
 });
 
 // =========================
-// Daily Challenge - WITH DEBUGGING
+// Daily Challenge - USING UTC
 // =========================
 app.get("/daily/:category/:size", async (req, res) => {
   const { category, size } = req.params;
-  console.log(`\n📅 Daily endpoint called with: category=${category}, size=${size}`);
+  
+  // Get UTC date from query parameter or use current UTC time
+  let targetDate = new Date();
+  if (req.query.date) {
+    targetDate = new Date(req.query.date as string);
+  }
+  
+  const utcDateString = getUTCDateString(targetDate);
+  const utcDayOfYear = getUTCDayOfYear(targetDate);
+  const fileNum = getDailyFileNumber(targetDate);
+  
+  console.log(`\n📅 Daily endpoint called with:`);
+  console.log(`   Category: ${category}`);
+  console.log(`   Size: ${size}`);
+  console.log(`   UTC Date: ${utcDateString}`);
+  console.log(`   UTC Day of Year: ${utcDayOfYear}`);
+  console.log(`   Selected File Number: ${fileNum}`);
   
   try {
     const sizeNum = parseInt(size);
     const difficulty = "easy";
-    const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    
-    const now = new Date();
-    const start = new Date(now.getFullYear(), 0, 0);
-    const dayOfYear = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    const fileNum = fileNumbers[dayOfYear % fileNumbers.length];
     
     const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${fileNum}.json`;
     console.log(`📂 Attempting to fetch daily: ${url}`);
@@ -152,8 +214,9 @@ app.get("/daily/:category/:size", async (req, res) => {
     const puzzles = await fetchJson<any[]>(url);
     
     if (puzzles && puzzles.length > 0) {
-      const puzzleIndex = dayOfYear % puzzles.length;
-      console.log(`✅ Found daily puzzle! Returning index ${puzzleIndex}`);
+      // Use UTC day of year to determine which puzzle index
+      const puzzleIndex = utcDayOfYear % puzzles.length;
+      console.log(`✅ Found daily puzzle! UTC Date: ${utcDateString}, Puzzle Index: ${puzzleIndex}`);
       res.json({ ...puzzles[puzzleIndex], category });
     } else {
       console.log(`❌ No daily puzzles found`);
@@ -161,7 +224,8 @@ app.get("/daily/:category/:size", async (req, res) => {
         error: "No daily puzzle found",
         attempted_url: url,
         category,
-        size
+        size,
+        utcDate: utcDateString
       });
     }
   } catch (error) {
@@ -171,22 +235,39 @@ app.get("/daily/:category/:size", async (req, res) => {
 });
 
 // =========================
-// Weekly Challenge - WITH DEBUGGING
+// Weekly Challenge - USING UTC
 // =========================
 app.get("/weekly/:category/:size", async (req, res) => {
   const { category, size } = req.params;
-  console.log(`\n📆 Weekly endpoint called with: category=${category}, size=${size}`);
+  
+  // Get UTC week from query parameter or use current UTC time
+  let targetDate = new Date();
+  let targetWeek: number | null = null;
+  
+  if (req.query.week) {
+    targetWeek = parseInt(req.query.week as string);
+  }
+  
+  const utcWeekNumber = targetWeek !== null ? targetWeek : getUTCWeekNumber(targetDate);
+  const fileNum = getWeeklyFileNumber(targetDate);
+  
+  // If a specific week was provided, we need to create a date for that week
+  // to ensure consistent puzzle selection
+  let seedValue = utcWeekNumber;
+  if (targetWeek !== null) {
+    seedValue = targetWeek;
+  }
+  
+  console.log(`\n📆 Weekly endpoint called with:`);
+  console.log(`   Category: ${category}`);
+  console.log(`   Size: ${size}`);
+  console.log(`   UTC Week: ${utcWeekNumber}`);
+  console.log(`   Selected File Number: ${fileNum}`);
+  console.log(`   Seed Value: ${seedValue}`);
   
   try {
     const sizeNum = parseInt(size);
     const difficulty = "easy";
-    const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    
-    const now = new Date();
-    const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
-    const pastDays = (now.getTime() - firstDayOfYear.getTime()) / 86400000;
-    const weekNumber = Math.ceil((pastDays + firstDayOfYear.getDay() + 1) / 7);
-    const fileNum = fileNumbers[weekNumber % fileNumbers.length];
     
     const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${fileNum}.json`;
     console.log(`📂 Attempting to fetch weekly: ${url}`);
@@ -194,15 +275,18 @@ app.get("/weekly/:category/:size", async (req, res) => {
     const puzzles = await fetchJson<any[]>(url);
     
     if (puzzles && puzzles.length > 0) {
-      console.log(`✅ Found weekly puzzle! Returning first puzzle`);
-      res.json({ ...puzzles[0], category });
+      // Use UTC week number to determine which puzzle index
+      const puzzleIndex = seedValue % puzzles.length;
+      console.log(`✅ Found weekly puzzle! UTC Week: ${utcWeekNumber}, Puzzle Index: ${puzzleIndex}`);
+      res.json({ ...puzzles[puzzleIndex], category });
     } else {
       console.log(`❌ No weekly puzzles found`);
       res.status(404).json({ 
         error: "No weekly puzzle found",
         attempted_url: url,
         category,
-        size
+        size,
+        utcWeek: utcWeekNumber
       });
     }
   } catch (error) {
@@ -212,7 +296,7 @@ app.get("/weekly/:category/:size", async (req, res) => {
 });
 
 // =========================
-// Category Facts - WITH DEBUGGING
+// Category Facts
 // =========================
 app.get("/facts/:category", async (req, res) => {
   const { category } = req.params;
@@ -242,6 +326,37 @@ app.get("/facts/:category", async (req, res) => {
 });
 
 // =========================
+// Debug endpoint to check UTC values
+// =========================
+app.get("/debug/utc", (req, res) => {
+  const now = new Date();
+  const utcDate = getUTCDateString(now);
+  const utcDayOfYear = getUTCDayOfYear(now);
+  const utcWeekNumber = getUTCWeekNumber(now);
+  const dailyFileNum = getDailyFileNumber(now);
+  const weeklyFileNum = getWeeklyFileNumber(now);
+  
+  res.json({
+    local: {
+      time: now.toString(),
+      date: now.toLocaleDateString(),
+      hours: now.getHours(),
+      dayOfWeek: now.getDay()
+    },
+    utc: {
+      time: now.toUTCString(),
+      date: utcDate,
+      dayOfYear: utcDayOfYear,
+      weekNumber: utcWeekNumber,
+      dailyFileNumber: dailyFileNum,
+      weeklyFileNumber: weeklyFileNum
+    },
+    timezoneOffset: -now.getTimezoneOffset() / 60,
+    message: "All challenges use UTC date/week for consistency worldwide"
+  });
+});
+
+// =========================
 // Start Server
 // =========================
 app.listen(PORT, () => {
@@ -250,9 +365,10 @@ app.listen(PORT, () => {
   console.log(`\n📋 Available endpoints:`);
   console.log(`   GET http://localhost:${PORT}/health`);
   console.log(`   GET http://localhost:${PORT}/test`);
-  console.log(`   GET http://localhost:${PORT}/test-github (TEST GITHUB ACCESS)`);
+  console.log(`   GET http://localhost:${PORT}/test-github`);
+  console.log(`   GET http://localhost:${PORT}/debug/utc (DEBUG UTC VALUES)`);
   console.log(`   GET http://localhost:${PORT}/puzzle/:category/:size/:difficulty`);
-  console.log(`   GET http://localhost:${PORT}/daily/:category/:size`);
-  console.log(`   GET http://localhost:${PORT}/weekly/:category/:size`);
+  console.log(`   GET http://localhost:${PORT}/daily/:category/:size?date=YYYY-MM-DD`);
+  console.log(`   GET http://localhost:${PORT}/weekly/:category/:size?week=1-53`);
   console.log(`   GET http://localhost:${PORT}/facts/:category`);
 });

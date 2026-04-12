@@ -13,16 +13,16 @@ import {
   PuzzleResponse,
   Category
 } from '../services/api';
-import { updateUserChallenge, getUserChallengeResult } from '../services/userService';
+import { updateUserChallenge, getUserChallengeResult, getPlayerRank } from '../services/userService';
 import { incrementChallengePlayerCount } from '../services/simpleChallengeService';
 import ControlButton from '../components/play/ControlButton';
 import HintButton from '../components/play/HintButton';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { auth, db } from '../services/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { getPlayerRank } from '../services/userService';
 import { getCategoryDisplayName } from '../utils/categoryHelpers';
 import { getUTCDateString, getWeekNumber } from '../utils/timeUtils';
+import { ChallengeCategory } from '../types/challenge';
 
 type Mode = 'sequential' | 'daily' | 'weekly';
 
@@ -41,12 +41,6 @@ export default function PlayScreen() {
   const { markChallengeCompleted, refreshChallengeStatus } = useGameMode();
   const { theme } = React.useContext(ThemeContext);
   const colors = themeStyles[theme];
-
-  function getWeekNumber(date: Date): string {
-    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
-    const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
-    return String(Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7));
-  }
 
   const getSubgridDimensions = (size: number) => {
     if (size === 5) return { rows: 1, cols: 5 };
@@ -109,6 +103,8 @@ export default function PlayScreen() {
   const timerRunning = useRef(false);
   const [gameCompleted, setGameCompleted] = useState(false);
   const [hasSavedResult, setHasSavedResult] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [rankAchieved, setRankAchieved] = useState<number | null>(null);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -116,21 +112,31 @@ export default function PlayScreen() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // In PlayScreen.tsx - Update the saveChallengeResult function
+  // Save challenge result with position tracking
   const saveChallengeResult = async (timeInSeconds: number, isPerfect: boolean, accuracy: number) => {
+    if (isSaving) return false;
+    
     try {
       const user = auth.currentUser;
-      if (!user || !currentChallengeId) return false;
+      if (!user || !currentChallengeId) {
+        console.log('❌ Cannot save: No user or challenge ID');
+        return false;
+      }
 
+      setIsSaving(true);
       console.log('💾 SAVING CHALLENGE RESULT:', { 
         challengeId: currentChallengeId, 
         time: timeInSeconds,
         mode,
-        category: selectedCategory
+        category: selectedCategory,
+        moves,
+        correctMoves,
+        wrongMoves,
+        isPerfect
       });
 
-      // First, save the challenge result
-      await updateUserChallenge(
+      // Save the challenge result
+      const saveResult = await updateUserChallenge(
         user.uid,
         currentChallengeId,
         true,
@@ -142,80 +148,67 @@ export default function PlayScreen() {
         accuracy
       );
 
-      // After saving, get the user's rank for this challenge
-      const rank = await getPlayerRank(currentChallengeId, user.uid);
-      console.log('🏆 User rank for this challenge:', rank);
-
-      // Update position stats based on rank
-      if (rank === 1) {
-        console.log('🥇 FIRST PLACE! Updating position stats...');
-        
-        // Update user's profile stats for first place wins
-        const userRef = doc(db, "users", user.uid);
-        const userDoc = await getDoc(userRef);
-        const currentStats = userDoc.data()?.stats || {};
-        
-        const updateData: any = {
-          'stats.firstPlaceWins': (currentStats.firstPlaceWins || 0) + 1
-        };
-        
-        // Track specific challenge type
-        if (mode === 'daily') {
-          updateData['stats.dailyFirstPlace'] = (currentStats.dailyFirstPlace || 0) + 1;
-        } else if (mode === 'weekly') {
-          updateData['stats.weeklyFirstPlace'] = (currentStats.weeklyFirstPlace || 0) + 1;
-        }
-        
-        await updateDoc(userRef, updateData);
-        console.log('✅ First place stats updated!');
-        
-      } else if (rank === 2) {
-        console.log('🥈 SECOND PLACE! Updating position stats...');
-        
-        const userRef = doc(db, "users", user.uid);
-        const userDoc = await getDoc(userRef);
-        const currentStats = userDoc.data()?.stats || {};
-        
-        const updateData: any = {
-          'stats.secondPlaceWins': (currentStats.secondPlaceWins || 0) + 1
-        };
-        
-        if (mode === 'daily') {
-          updateData['stats.dailySecondPlace'] = (currentStats.dailySecondPlace || 0) + 1;
-        } else if (mode === 'weekly') {
-          updateData['stats.weeklySecondPlace'] = (currentStats.weeklySecondPlace || 0) + 1;
-        }
-        
-        await updateDoc(userRef, updateData);
-        console.log('✅ Second place stats updated!');
-        
-      } else if (rank === 3) {
-        console.log('🥉 THIRD PLACE! Updating position stats...');
-        
-        const userRef = doc(db, "users", user.uid);
-        const userDoc = await getDoc(userRef);
-        const currentStats = userDoc.data()?.stats || {};
-        
-        const updateData: any = {
-          'stats.thirdPlaceWins': (currentStats.thirdPlaceWins || 0) + 1
-        };
-        
-        if (mode === 'daily') {
-          updateData['stats.dailyThirdPlace'] = (currentStats.dailyThirdPlace || 0) + 1;
-        } else if (mode === 'weekly') {
-          updateData['stats.weeklyThirdPlace'] = (currentStats.weeklyThirdPlace || 0) + 1;
-        }
-        
-        await updateDoc(userRef, updateData);
-        console.log('✅ Third place stats updated!');
+      if (!saveResult) {
+        console.error('❌ Failed to save challenge result');
+        return false;
       }
 
-      console.log('✅ Challenge result saved successfully with position tracking');
+      console.log('✅ Challenge result saved successfully');
+
+      // Get user's rank for this challenge
+      const rank = await getPlayerRank(currentChallengeId, user.uid);
+      console.log('🏆 User rank for this challenge:', rank);
+      setRankAchieved(rank);
+
+      // Update position stats based on rank
+      if (rank === 1 || rank === 2 || rank === 3) {
+        const userRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userRef);
+        const currentStats = userDoc.data()?.stats || {};
+        
+        const updateData: any = {};
+        
+        // Overall position counts
+        if (rank === 1) {
+          updateData['stats.firstPlaceWins'] = (currentStats.firstPlaceWins || 0) + 1;
+          console.log('🥇 FIRST PLACE! Total first place wins:', (currentStats.firstPlaceWins || 0) + 1);
+        } else if (rank === 2) {
+          updateData['stats.secondPlaceWins'] = (currentStats.secondPlaceWins || 0) + 1;
+          console.log('🥈 SECOND PLACE! Total second place wins:', (currentStats.secondPlaceWins || 0) + 1);
+        } else if (rank === 3) {
+          updateData['stats.thirdPlaceWins'] = (currentStats.thirdPlaceWins || 0) + 1;
+          console.log('🥉 THIRD PLACE! Total third place wins:', (currentStats.thirdPlaceWins || 0) + 1);
+        }
+        
+        // Challenge-specific position counts
+        if (mode === 'daily') {
+          if (rank === 1) updateData['stats.dailyFirstPlace'] = (currentStats.dailyFirstPlace || 0) + 1;
+          if (rank === 2) updateData['stats.dailySecondPlace'] = (currentStats.dailySecondPlace || 0) + 1;
+          if (rank === 3) updateData['stats.dailyThirdPlace'] = (currentStats.dailyThirdPlace || 0) + 1;
+          console.log(`📅 Daily challenge ${rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'} place recorded`);
+        } else if (mode === 'weekly') {
+          if (rank === 1) updateData['stats.weeklyFirstPlace'] = (currentStats.weeklyFirstPlace || 0) + 1;
+          if (rank === 2) updateData['stats.weeklySecondPlace'] = (currentStats.weeklySecondPlace || 0) + 1;
+          if (rank === 3) updateData['stats.weeklyThirdPlace'] = (currentStats.weeklyThirdPlace || 0) + 1;
+          console.log(`📆 Weekly challenge ${rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'} place recorded`);
+        }
+        
+        if (Object.keys(updateData).length > 0) {
+          await updateDoc(userRef, updateData);
+          console.log('✅ Position stats updated successfully!');
+          
+          // Refresh profile to show updated stats
+          await refreshProfile();
+        }
+      }
+
       return true;
       
     } catch (error) {
       console.error('❌ Failed to save challenge result:', error);
       return false;
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -224,18 +217,21 @@ export default function PlayScreen() {
     setError(null);
 
     try {
-      // 🔒 CRITICAL: Check if challenge already completed before loading
+      // Check if challenge already completed before loading
       if (mode !== 'sequential') {
         const user = auth.currentUser;
         if (user && currentChallengeId) {
+          console.log('🔍 Checking if challenge already completed:', currentChallengeId);
           const existingResult = await getUserChallengeResult(user.uid, currentChallengeId);
+          
+          console.log('📊 Existing result:', existingResult);
           
           if (existingResult && existingResult.completed === true) {
             console.log('🔒 Challenge already completed! Redirecting to results...');
             navigation.replace('ChallengeResults', {
               challengeId: currentChallengeId,
               challengeType: mode,
-              time: existingResult.bestTime,
+              time: existingResult.bestTime || existingResult.time,
               isPerfect: existingResult.isPerfect,
               moves: existingResult.moves,
               correctMoves: existingResult.correctMoves,
@@ -252,10 +248,13 @@ export default function PlayScreen() {
       let puzzle: PuzzleResponse | null = null;
 
       if (mode === 'daily') {
+        console.log('📅 Fetching daily challenge for:', selectedCategory);
         puzzle = await fetchDailyChallenge(selectedCategory, sizeNumber);
       } else if (mode === 'weekly') {
+        console.log('📆 Fetching weekly challenge for:', selectedCategory);
         puzzle = await fetchWeeklyChallenge(selectedCategory, sizeNumber);
       } else {
+        console.log('🎮 Fetching sequential puzzle for:', selectedCategory);
         puzzle = await fetchSequentialPuzzle(selectedCategory, sizeNumber, effectiveDifficulty);
       }
 
@@ -263,6 +262,7 @@ export default function PlayScreen() {
         throw new Error(`No puzzle available for ${getCategoryDisplayName(selectedCategory)} category.`);
       }
 
+      console.log('✅ Loaded puzzle:', puzzle.id);
       setPuzzleData(puzzle);
       setUserGrid(puzzle.puzzle.map(r => [...r]));
       setDisabledCards(new Set());
@@ -274,10 +274,10 @@ export default function PlayScreen() {
       setTimer(0);
       setGameCompleted(false);
       setHasSavedResult(false);
+      setIsSaving(false);
+      setRankAchieved(null);
       timerRunning.current = false;
       if (timerRef.current) clearInterval(timerRef.current);
-
-      console.log('✅ Loaded puzzle:', puzzle.id);
 
     } catch (err: any) {
       console.error('❌ Failed to load puzzle:', err);
@@ -357,31 +357,32 @@ export default function PlayScreen() {
 
       const solved = newGrid.every((row, r) => row.every((cell, c) => cell === puzzleData.solution[r][c]));
       
-      if (solved && !hasSavedResult) {
+      if (solved && !hasSavedResult && !isSaving) {
         setHasSavedResult(true);
         stopTimer();
-        setGameCompleted(true);
         
         const accuracy = calculateAccuracy();
         const isPerfect = wrongMoves === 0;
         const isWeekend = [0, 6].includes(new Date().getDay());
         
-        console.log('🎯 GAME COMPLETED - Time:', timer, 'Perfect:', isPerfect);
+        console.log('🎯 GAME COMPLETED - Time:', timer, 'Perfect:', isPerfect, 'Mode:', mode);
 
         Alert.alert('🎉 Challenge Completed!', `You solved the puzzle!\nTime: ${formatTime(timer)}`);
 
         // Update stats
         if (profile) {
           await incrementPuzzlesSolved(timer, moves, correctMoves, wrongMoves, isPerfect, isWeekend, mode === 'daily', mode === 'weekly');
+          await refreshProfile();
         }
         
-        // 🔒 For challenges - save completion to prevent replay
+        // For challenges - save completion to prevent replay
         if (mode !== 'sequential') {
           const saved = await saveChallengeResult(timer, isPerfect, accuracy);
           
           if (saved) {
             console.log('✅ Challenge marked as completed - cannot be played again');
             
+            // Update the context
             markChallengeCompleted(mode, {
               bestTime: timer,
               isPerfect: isPerfect,
@@ -393,12 +394,19 @@ export default function PlayScreen() {
               completedAt: new Date().toISOString()
             }, selectedCategory);
             
+            // Refresh challenge status
             await refreshChallengeStatus(selectedCategory);
+            
+            // Increment player count
             await incrementChallengePlayerCount(mode, selectedCategory);
+          } else {
+            console.error('❌ Failed to save challenge completion');
           }
         }
         
-        // Navigate to results
+        setGameCompleted(true);
+        
+        // Navigate to results after delay
         setTimeout(() => {
           if (mode === 'daily' || mode === 'weekly') {
             navigation.replace('ChallengeResults', {
@@ -412,6 +420,7 @@ export default function PlayScreen() {
               accuracy,
               completed: true,
               category: selectedCategory,
+              rank: rankAchieved,
             });
           } else {
             navigation.replace('GameResults', {
@@ -448,6 +457,8 @@ export default function PlayScreen() {
     setDisabledCards(new Set());
     setGameCompleted(false);
     setHasSavedResult(false);
+    setIsSaving(false);
+    setRankAchieved(null);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRunning.current = false;
   };

@@ -1,4 +1,4 @@
-// src/screens/DailyChallengeScreen.tsx
+// src/screens/DailyChallengeScreen.tsx (fixed)
 import React, { useContext, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   View,
@@ -29,6 +29,7 @@ import {
 import { auth } from "../services/firebase";
 import AppFooter from "../components/common/AppFooter";
 import ChallengeLeaderboard from "../components/challenges/ChallengeLeaderboard";
+import { ChallengeCategory } from "../types/challenge";
 
 type RootStackParamList = {
   Play: {
@@ -109,12 +110,14 @@ const DailyChallengeScreen = () => {
   const [currentUTCTime, setCurrentUTCTime] = useState(formatUTCDateTime());
   const [currentLocalTime, setCurrentLocalTime] = useState(formatLocalDateTime());
   
-  // State for challenge name
+  // State for challenge name and emoji
   const [challengeName, setChallengeName] = useState('');
+  const [challengeEmoji, setChallengeEmoji] = useState('');
   
   const timeUpdateRef = useRef<number | null>(null);
   
   const selectedCategory = (settings as any).category || 'animals';
+  const category = selectedCategory as ChallengeCategory;
   const challengeId = `daily-${getUTCDateString()}-${selectedCategory}`;
   const challengeActive = isDailyChallengeActive();
   const currentGridSize = settings.gridSize || '8x8';
@@ -129,15 +132,20 @@ const DailyChallengeScreen = () => {
     { date: getPreviousDayName(3), id: `daily-${getPreviousUTCDateString(3)}-${selectedCategory}`, completed: false, time: null as number | null },
   ]);
 
-  // Load challenge name from service
+  // Load challenge name and emoji from service
   const loadChallengeName = async () => {
     try {
-      const name = await challengeService.getCurrentChallengeName('daily', currentGridSize);
-      setChallengeName(name);
-      console.log('📛 Daily challenge name loaded:', name);
+      // Get the full challenge display with emoji
+      const displayName = await challengeService.getCurrentChallengeDisplay('daily', currentGridSize, category);
+      // Extract just the name without emoji if needed, or store both
+      const metadata = await challengeService.getChallengeMetadata('daily', currentGridSize, category);
+      setChallengeName(metadata.name);
+      setChallengeEmoji(metadata.challengeEmoji);
+      console.log('📛 Daily challenge loaded:', { name: metadata.name, emoji: metadata.challengeEmoji, display: displayName });
     } catch (error) {
       console.error('Error loading challenge name:', error);
       setChallengeName('Daily Challenge');
+      setChallengeEmoji('🎯');
     }
   };
 
@@ -304,10 +312,10 @@ const DailyChallengeScreen = () => {
         <View style={[styles.header, { backgroundColor: colors.button }]}>
           <Text style={[styles.title, { color: getContrastColor(colors.button) }]}>Daily Challenge</Text>
           
-          {/* Challenge Name Display */}
+          {/* Challenge Name Display with Emoji */}
           <View style={styles.challengeNameContainer}>
             <Text style={[styles.challengeNameText, { color: getContrastColor(colors.button) }]}>
-              {challengeName || 'Loading...'}
+              {challengeEmoji} {challengeName || 'Loading...'}
             </Text>
           </View>
           
@@ -331,7 +339,7 @@ const DailyChallengeScreen = () => {
           
           <View style={styles.challengeHeader}>
             <Text style={[styles.challengeTitle, { color: getContrastColor(colors.button) }]}>
-              {challengeName || 'Daily Challenge'}
+              {challengeEmoji} {challengeName || 'Daily Challenge'}
             </Text>
             <Text style={[styles.gridSizeBadge, { color: getContrastColor(colors.button), backgroundColor: 'rgba(255,255,255,0.2)' }]}>
               {settings.gridSize || '8x8'}

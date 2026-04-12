@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -75,7 +75,11 @@ const GreetingHeader: React.FC<GreetingHeaderProps> = ({
         </Text>
       </View>
       <View style={[styles.logoContainer, { backgroundColor: themeColors.button }]}>
-        <Text style={[styles.logoText, { color: themeColors.text }]}>Sudoku Tiles</Text>
+        <Image 
+          source={require('../../../assets/icon.png')} 
+          style={styles.logoImage}
+        />
+        <Text style={[styles.logoText, { color: themeColors.text }]}>Sudoku Tiles Pro</Text>
       </View>
     </View>
   );
@@ -84,7 +88,6 @@ const GreetingHeader: React.FC<GreetingHeaderProps> = ({
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingHorizontal: 20,
     paddingVertical: 15,
@@ -131,15 +134,17 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
     marginTop: 4,
+    marginLeft: 'auto',
   },
-  logoEmoji: {
-    fontSize: 24,
-    marginRight: 8,
+  logoImage: {
+    width: 15,
+    height: 15,
+    transform: [{ rotate: '45deg' }],
+    marginRight: 10,
   },
   logoText: {
     fontSize: 18,

@@ -1,5 +1,5 @@
 // src/screens/HomeScreen.tsx
-import React, { useContext, useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useContext, useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -46,11 +46,11 @@ import { AppFooter } from "../components/common";
 import ShareInvite from "../components/common/ShareInvite";
 
 // Import services
-import { getChallengePlayerCount } from "../services/simpleChallengeService";
-import { getUTCDateString, getWeekNumber, getTimeRemaining } from "../utils/timeUtils";
+import { getUTCDateString, getWeekNumber } from "../utils/timeUtils";
 import { fetchDailyCategoryFact } from "../services/api";
-import { getStatisticsData, getUserChallengeResult } from "../services/userService";
+import { getStatisticsData } from "../services/userService";
 import { auth } from "../services/firebase";
+import { ChallengeCategory } from "../types/challenge";
 
 // Navigation types
 type RootStackParamList = {
@@ -143,12 +143,18 @@ const HomeScreen: React.FC = () => {
   const { 
     dailyCompletion, 
     weeklyCompletion, 
+    dailyLockStatus,
+    weeklyLockStatus,
     refreshChallengeStatus,
   } = useGameMode();
   
   const colors = themeStyles[theme];
   
   const selectedCategory = (settings as any).category || DEFAULT_SETTINGS.category;
+  const currentGridSize = settings.gridSize || DEFAULT_SETTINGS.gridSize;
+  const currentDifficulty = settings.difficulty || DEFAULT_SETTINGS.difficulty;
+  
+  // Get data from category helpers
   const todayItem = getTodayCategoryItem(selectedCategory);
   const weekItem = getWeekCategoryItem(selectedCategory);
   const categoryEmoji = getCategoryEmoji(selectedCategory);
@@ -195,25 +201,22 @@ const HomeScreen: React.FC = () => {
     loading: true,
   });
   
-  const [dailyChallengeData, setDailyChallengeData] = useState({
+  const [dailyChallengeState, setDailyChallengeState] = useState({
     playerCount: 0,
-    loading: true
+    loading: true,
+    title: '',
+    emoji: '',
   });
   
-  const [weeklyChallengeData, setWeeklyChallengeData] = useState({
+  const [weeklyChallengeState, setWeeklyChallengeState] = useState({
     playerCount: 0,
-    loading: true
+    loading: true,
+    title: '',
+    emoji: '',
   });
-
-  // State for challenge names
-  const [dailyChallengeName, setDailyChallengeName] = useState('');
-  const [weeklyChallengeName, setWeeklyChallengeName] = useState('');
 
   const timeUpdateRef = useRef<number | null>(null);
   const [forceUpdate, setForceUpdate] = useState(0);
-
-  const currentGridSize = settings.gridSize || DEFAULT_SETTINGS.gridSize;
-  const currentDifficulty = settings.difficulty || DEFAULT_SETTINGS.difficulty;
 
   // Use context for completion status
   const dailyCompleted = dailyCompletion.completed;
@@ -221,18 +224,64 @@ const HomeScreen: React.FC = () => {
   const dailyResultData = dailyCompletion.result;
   const weeklyResultData = weeklyCompletion.result;
 
-  // Load challenge names from challengeService
-  const loadChallengeNames = async () => {
+  // Load challenge data (titles, emojis, and player counts)
+  const loadChallengeData = async () => {
     try {
-      const dailyName = await challengeService.getCurrentChallengeName('daily', currentGridSize);
-      const weeklyName = await challengeService.getCurrentChallengeName('weekly', currentGridSize);
+      const category = selectedCategory as ChallengeCategory;
       
-      setDailyChallengeName(dailyName);
-      setWeeklyChallengeName(weeklyName);
+      // IMPORTANT: Refresh challenge status first to get latest completion state
+      await refreshChallengeStatus(category);
       
-      console.log('📛 Challenge names loaded:', { dailyName, weeklyName });
+      // Load daily challenge metadata
+      const dailyMetadata = await challengeService.getChallengeMetadata('daily', currentGridSize, category);
+      const dailyPlayerCount = await challengeService.getChallengePlayerCount('daily', category);
+      
+      setDailyChallengeState({
+        playerCount: dailyPlayerCount,
+        loading: false,
+        title: dailyMetadata.name,
+        emoji: dailyMetadata.challengeEmoji,
+      });
+      
+      // Load weekly challenge metadata
+      const weeklyMetadata = await challengeService.getChallengeMetadata('weekly', currentGridSize, category);
+      const weeklyPlayerCount = await challengeService.getChallengePlayerCount('weekly', category);
+      
+      setWeeklyChallengeState({
+        playerCount: weeklyPlayerCount,
+        loading: false,
+        title: weeklyMetadata.name,
+        emoji: weeklyMetadata.challengeEmoji,
+      });
+      
+      console.log('📛 Challenge data loaded:', {
+        category,
+        daily: {
+          title: dailyMetadata.name,
+          emoji: dailyMetadata.challengeEmoji,
+          completed: dailyCompleted,
+        },
+        weekly: {
+          title: weeklyMetadata.name,
+          emoji: weeklyMetadata.challengeEmoji,
+          completed: weeklyCompleted,
+        }
+      });
     } catch (error) {
-      console.error('Error loading challenge names:', error);
+      console.error('Error loading challenge data:', error);
+      // Fallback to category helpers
+      setDailyChallengeState({
+        playerCount: 0,
+        loading: false,
+        title: `${getCategoryDisplayName(selectedCategory)} Challenge`,
+        emoji: todayItem.emoji,
+      });
+      setWeeklyChallengeState({
+        playerCount: 0,
+        loading: false,
+        title: `${getCategoryDisplayName(selectedCategory)} Weekly`,
+        emoji: weekItem.emoji,
+      });
     }
   };
 
@@ -304,22 +353,22 @@ const HomeScreen: React.FC = () => {
       }
 
       const factString = await fetchDailyCategoryFact(selectedCategory);
-      const categoryEmoji = getCategoryEmoji(selectedCategory);
+      const categoryEmojiLocal = getCategoryEmoji(selectedCategory);
       const categoryName = getCategoryDisplayName(selectedCategory);
       
       let displayFact = factString;
       let factName = '';
-      let factEmoji = categoryEmoji;
+      let factEmoji = categoryEmojiLocal;
       let factText = '';
       
       if (!displayFact) {
-        displayFact = `${categoryEmoji} ${categoryName}: Discover amazing ${categoryName.toLowerCase()} facts!`;
+        displayFact = `${categoryEmojiLocal} ${categoryName}: Discover amazing ${categoryName.toLowerCase()} facts!`;
         factName = categoryName;
         factText = `Discover amazing ${categoryName.toLowerCase()} facts!`;
       } else {
         const extracted = extractFactInfo(displayFact);
         factName = extracted.factName || categoryName;
-        factEmoji = extracted.factEmoji || categoryEmoji;
+        factEmoji = extracted.factEmoji || categoryEmojiLocal;
         factText = extracted.factText || displayFact;
       }
 
@@ -334,34 +383,19 @@ const HomeScreen: React.FC = () => {
       setFactData({ displayFact, factName, factEmoji, factText, progress, loading: false });
     } catch (error: any) {
       console.error('Error loading category fact:', error.message);
-      const categoryEmoji = getCategoryEmoji(selectedCategory);
+      const categoryEmojiLocal = getCategoryEmoji(selectedCategory);
       const categoryName = getCategoryDisplayName(selectedCategory);
-      const fallbackFact = `${categoryEmoji} ${categoryName}: Amazing facts coming soon!`;
+      const fallbackFact = `${categoryEmojiLocal} ${categoryName}: Amazing facts coming soon!`;
       
       setFactData({
         displayFact: fallbackFact,
         factName: categoryName,
-        factEmoji: categoryEmoji,
+        factEmoji: categoryEmojiLocal,
         factText: `Amazing ${categoryName} facts coming soon!`,
         progress: 'Offline mode',
         loading: false,
         error: error.message,
       });
-    }
-  };
-
-  // Load challenge data (player counts)
-  const loadChallengeData = async () => {
-    try {
-      const dailyPlayerCount = await getChallengePlayerCount('daily', selectedCategory);
-      setDailyChallengeData({ playerCount: dailyPlayerCount, loading: false });
-
-      const weeklyPlayerCount = await getChallengePlayerCount('weekly', selectedCategory);
-      setWeeklyChallengeData({ playerCount: weeklyPlayerCount, loading: false });
-    } catch (error) {
-      console.error('Error loading challenge data:', error);
-      setDailyChallengeData({ playerCount: 0, loading: false });
-      setWeeklyChallengeData({ playerCount: 0, loading: false });
     }
   };
 
@@ -372,10 +406,8 @@ const HomeScreen: React.FC = () => {
     loadAchievementsFromProfile();
     await Promise.all([
       loadLocalStats(),
-      refreshChallengeStatus(selectedCategory),
       loadChallengeData(),
       loadCategoryFact(),
-      loadChallengeNames()
     ]);
   };
 
@@ -384,8 +416,6 @@ const HomeScreen: React.FC = () => {
     loadChallengeData();
     loadCategoryFact();
     loadLocalStats();
-    refreshChallengeStatus(selectedCategory);
-    loadChallengeNames();
     
     timeUpdateRef.current = setInterval(() => {
       setForceUpdate(prev => prev + 1);
@@ -439,37 +469,13 @@ const HomeScreen: React.FC = () => {
     return luminance > 0.5 ? '#000000' : '#ffffff';
   };
 
-  // Get remaining time for daily challenge
-  const getDailyRemainingTime = () => {
-    const now = new Date();
-    const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-    const diff = utcMidnight.getTime() - now.getTime();
-    if (diff <= 0) return 'Expired';
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours}h ${minutes}m`;
-  };
+  // Get remaining time for display (use lockStatus from context)
+  const dailyRemaining = dailyLockStatus?.remainingTime || 'Loading...';
+  const weeklyRemaining = weeklyLockStatus?.remainingTime || 'Loading...';
+  const isDailyExpired = dailyLockStatus?.isExpired || false;
+  const isWeeklyExpired = weeklyLockStatus?.isExpired || false;
 
-  // Get remaining time for weekly challenge
-  const getWeeklyRemainingTime = () => {
-    const now = new Date();
-    const currentDay = now.getUTCDay();
-    let daysUntilMonday = currentDay === 1 ? 7 : (8 - currentDay) % 7;
-    if (daysUntilMonday === 0) daysUntilMonday = 7;
-    const nextMonday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday, 0, 0, 0));
-    const diff = nextMonday.getTime() - now.getTime();
-    if (diff <= 0) return 'Expired';
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return `${days}d ${hours}h`;
-  };
-
-  const dailyRemaining = getDailyRemainingTime();
-  const weeklyRemaining = getWeeklyRemainingTime();
-  const isDailyExpired = dailyRemaining === 'Expired';
-  const isWeeklyExpired = weeklyRemaining === 'Expired';
-
-  // Button text based on completion status
+  // Button text based on completion status and lock status
   const getDailyButtonText = () => {
     if (dailyCompleted) return 'VIEW RESULTS';
     if (isDailyExpired) return 'DAILY CHALLENGE EXPIRED';
@@ -496,9 +502,19 @@ const HomeScreen: React.FC = () => {
 
   // Navigation handlers
   const handleDailyChallengePress = () => {
-    if (dailyCompleted) {
+    console.log('Daily challenge pressed - Status:', {
+      completed: dailyCompleted,
+      isExpired: isDailyExpired,
+      hasResult: !!dailyResultData,
+      category: selectedCategory,
+    });
+    
+    if (dailyCompleted && dailyResultData) {
+      const todayDate = getUTCDateString();
+      const challengeId = `daily-${todayDate}-${selectedCategory}`;
+      
       navigation.navigate('ChallengeResults', {
-        challengeId: `daily-${getUTCDateString()}-${selectedCategory}`,
+        challengeId: challengeId,
         challengeType: 'daily',
         time: dailyResultData?.bestTime,
         isPerfect: dailyResultData?.isPerfect,
@@ -525,9 +541,19 @@ const HomeScreen: React.FC = () => {
   };
 
   const handleWeeklyChallengePress = () => {
-    if (weeklyCompleted) {
+    console.log('Weekly challenge pressed - Status:', {
+      completed: weeklyCompleted,
+      isExpired: isWeeklyExpired,
+      hasResult: !!weeklyResultData,
+      category: selectedCategory,
+    });
+    
+    if (weeklyCompleted && weeklyResultData) {
+      const weekNumber = getWeekNumber(new Date());
+      const challengeId = `weekly-${weekNumber}-${selectedCategory}`;
+      
       navigation.navigate('ChallengeResults', {
-        challengeId: `weekly-${getWeekNumber(new Date())}-${selectedCategory}`,
+        challengeId: challengeId,
         challengeType: 'weekly',
         time: weeklyResultData?.bestTime,
         isPerfect: weeklyResultData?.isPerfect,
@@ -597,31 +623,28 @@ const HomeScreen: React.FC = () => {
 
   const greetingData = getGreeting();
 
+  // Create challenge objects using data from challengeService
   const dailyChallenge = {
-    title: dailyChallengeName || `Daily ${todayItem.name} Adventure`,
-    description: `Complete today's special ${currentGridSize} puzzle featuring ${todayItem.name.toLowerCase()}`,
+    title: dailyChallengeState.loading ? 'Loading...' : `${dailyChallengeState.emoji} ${dailyChallengeState.title}`,
+    description: `Complete today's special ${currentGridSize} puzzle`,
     remainingTime: dailyRemaining,
-    players: dailyChallengeData.playerCount.toLocaleString(),
-    emoji: todayItem.emoji,
-    itemName: todayItem.name,
-    category: getCategoryDisplayName(selectedCategory),
-    loading: dailyChallengeData.loading,
-    isUrgent: !isDailyExpired && dailyRemaining.includes('h') && parseInt(dailyRemaining) < 2,
+    players: dailyChallengeState.loading ? 'Loading...' : dailyChallengeState.playerCount.toLocaleString(),
+    emoji: dailyChallengeState.emoji,
+    loading: dailyChallengeState.loading,
+    isUrgent: !isDailyExpired && dailyRemaining !== 'Expired' && dailyRemaining.includes('h') && parseInt(dailyRemaining) < 2,
     played: dailyCompleted && !isDailyExpired,
     result: dailyResultData,
     isExpired: isDailyExpired,
   };
   
   const weeklyChallenge = {
-    title: weeklyChallengeName || `Weekly ${weekItem.name} Expedition`,
-    description: `A special ${currentGridSize} ${weekItem.name.toLowerCase()} puzzle available all week`,
+    title: weeklyChallengeState.loading ? 'Loading...' : `${weeklyChallengeState.emoji} ${weeklyChallengeState.title}`,
+    description: `A special ${currentGridSize} puzzle available all week`,
     remainingTime: weeklyRemaining,
-    players: weeklyChallengeData.playerCount.toLocaleString(),
-    emoji: weekItem.emoji,
-    itemName: weekItem.name,
-    category: getCategoryDisplayName(selectedCategory),
-    loading: weeklyChallengeData.loading || isLoadingStats,
-    isUrgent: !isWeeklyExpired && weeklyRemaining.includes('d') && parseInt(weeklyRemaining) === 1,
+    players: weeklyChallengeState.loading ? 'Loading...' : weeklyChallengeState.playerCount.toLocaleString(),
+    emoji: weeklyChallengeState.emoji,
+    loading: weeklyChallengeState.loading || isLoadingStats,
+    isUrgent: !isWeeklyExpired && weeklyRemaining !== 'Expired' && weeklyRemaining.includes('d') && parseInt(weeklyRemaining) === 1,
     played: weeklyCompleted && !isWeeklyExpired,
     result: weeklyResultData,
   };
@@ -638,20 +661,28 @@ const HomeScreen: React.FC = () => {
 
   // Debug function
   const debugStatus = async () => {
-    const user = auth.currentUser;
-    if (!user) {
-      Alert.alert('Debug', 'No user logged in');
-      return;
-    }
-    
     Alert.alert(
       'Challenge Status',
-      `📅 Daily: ${dailyCompleted ? '✅ Completed' : '❌ Not completed'}\n` +
-      `   Name: ${dailyChallengeName}\n` +
-      `   Time: ${dailyResultData?.bestTime || 'N/A'}s\n\n` +
-      `📆 Weekly: ${weeklyCompleted ? '✅ Completed' : '❌ Not completed'}\n` +
-      `   Name: ${weeklyChallengeName}\n` +
-      `   Time: ${weeklyResultData?.bestTime || 'N/A'}s`
+      `📅 Daily Challenge:\n` +
+      `   Display: ${dailyChallenge.title}\n` +
+      `   Title from service: ${dailyChallengeState.title}\n` +
+      `   Emoji from service: ${dailyChallengeState.emoji}\n` +
+      `   Completed: ${dailyCompleted ? '✅ Yes' : '❌ No'}\n` +
+      `   Expired: ${isDailyExpired ? '✅ Yes' : '❌ No'}\n` +
+      `   Remaining: ${dailyRemaining}\n` +
+      `   Category: ${getCategoryDisplayName(selectedCategory)}\n` +
+      `   Grid Size: ${currentGridSize}\n` +
+      `   Difficulty: ${currentDifficulty}\n\n` +
+      `📆 Weekly Challenge:\n` +
+      `   Display: ${weeklyChallenge.title}\n` +
+      `   Title from service: ${weeklyChallengeState.title}\n` +
+      `   Emoji from service: ${weeklyChallengeState.emoji}\n` +
+      `   Completed: ${weeklyCompleted ? '✅ Yes' : '❌ No'}\n` +
+      `   Expired: ${isWeeklyExpired ? '✅ Yes' : '❌ No'}\n` +
+      `   Remaining: ${weeklyRemaining}\n` +
+      `   Category: ${getCategoryDisplayName(selectedCategory)}\n` +
+      `   Grid Size: ${currentGridSize}\n` +
+      `   Difficulty: ${currentDifficulty}`
     );
   };
 
@@ -681,7 +712,7 @@ const HomeScreen: React.FC = () => {
             backgroundColor: colors.button,
             color: getContrastColor(colors.button)
           }]}>
-            Current Theme: {getCategoryDisplayName(selectedCategory)} {todayItem.emoji}
+            Current Theme: {getCategoryDisplayName(selectedCategory)} {categoryEmoji}
           </Text>
         </View>
 
@@ -692,20 +723,20 @@ const HomeScreen: React.FC = () => {
           title={dailyChallenge.title}
           description={dailyChallenge.description}
           remainingTime={dailyChallenge.remainingTime}
-          players={dailyChallenge.loading ? 'Loading...' : dailyChallenge.players}
+          players={dailyChallenge.players}
           emoji={dailyChallenge.emoji}
           themeColors={colors}
           isUrgent={dailyChallenge.isUrgent}
           isLoading={dailyChallenge.loading}
           onPress={handleDailyChallengePress}
           onPlayPress={handleDailyChallengePress}
-          played={dailyCompleted && !isDailyExpired}
+          played={dailyChallenge.played}
           result={dailyResultData}
           buttonText={getDailyButtonText()}
           buttonColor={getDailyButtonColor()}
         />
 
-        {/* Daily Preview */}
+        {/* Daily Preview - Shows upcoming emojis in the daily rotation */}
         <View style={[styles.previewContainer, { backgroundColor: `${colors.button}10` }]}>
           <Text style={[styles.previewTitle, { color: colors.text }]}>Coming up this week:</Text>
           <View style={styles.previewItems}>
@@ -725,20 +756,20 @@ const HomeScreen: React.FC = () => {
           title={weeklyChallenge.title}
           description={weeklyChallenge.description}
           remainingTime={weeklyChallenge.remainingTime}
-          players={weeklyChallenge.loading ? 'Loading...' : weeklyChallenge.players}
+          players={weeklyChallenge.players}
           emoji={weeklyChallenge.emoji}
           themeColors={colors}
           isUrgent={weeklyChallenge.isUrgent}
           isLoading={weeklyChallenge.loading}
           onPress={handleWeeklyChallengePress}
           onPlayPress={handleWeeklyChallengePress}
-          played={weeklyCompleted && !isWeeklyExpired}
+          played={weeklyChallenge.played}
           result={weeklyResultData}
           buttonText={getWeeklyButtonText()}
           buttonColor={getWeeklyButtonColor()}
         />
 
-        {/* Weekly Preview */}
+        {/* Weekly Preview - Shows upcoming emojis in the weekly rotation */}
         <View style={[styles.previewContainer, { backgroundColor: `${colors.button}10` }]}>
           <Text style={[styles.previewTitle, { color: colors.text }]}>Coming up this month:</Text>
           <View style={styles.previewItems}>
@@ -818,7 +849,7 @@ const HomeScreen: React.FC = () => {
           userId={userId}
           userName={userName}
           variant="card"
-          challengeName={dailyChallengeName}
+          challengeName={dailyChallenge.title}
           challengeType="daily"
         />
 

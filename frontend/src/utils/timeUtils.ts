@@ -100,9 +100,15 @@ export const getWeeklyTimeRemaining = (): string => {
   const now = new Date();
   const utcDay = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc. in UTC
   
-  // Days until next Monday UTC (if today is Monday, show time until next week's Monday)
-  let daysUntilMonday = utcDay === 1 ? 7 : (8 - utcDay) % 7;
-  if (daysUntilMonday === 0) daysUntilMonday = 7; // If today is Monday, go to next Monday
+  // Days until next Monday UTC
+  let daysUntilMonday;
+  if (utcDay === 1) { // Monday
+    daysUntilMonday = 7; // Show time until next Monday
+  } else if (utcDay === 0) { // Sunday
+    daysUntilMonday = 1; // Tomorrow is Monday
+  } else {
+    daysUntilMonday = 8 - utcDay; // Days until next Monday
+  }
   
   // Create date for next Monday at UTC midnight
   const nextMonday = new Date(Date.UTC(
@@ -129,24 +135,33 @@ export const getTimeRemaining = (type: 'daily' | 'weekly'): string => {
  */
 export const isDailyChallengeActive = (): boolean => {
   const now = new Date();
-  
   const utcMidnight = new Date(Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
     now.getUTCDate() + 1,
     0, 0, 0
   ));
-  
   return now.getTime() < utcMidnight.getTime();
 };
 
 /**
- * Check if weekly challenge is still active (before Monday UTC midnight)
+ * Check if weekly challenge is still active
+ * Weekly challenge is ALWAYS active during its week
+ * The "expiration" is handled by generating a new challenge ID each week
  */
 export const isWeeklyChallengeActive = (): boolean => {
-  const now = new Date();
-  const nextMonday = getNextMondayUTC();
-  return now.getTime() < nextMonday.getTime();
+  // Weekly challenges are always active for the current week
+  // The challenge ID changes each week, so previous week's challenges
+  // are simply not accessed anymore
+  return true;
+};
+
+/**
+ * Check if a weekly challenge is from a previous week
+ */
+export const isWeeklyChallengeExpired = (weekNumber: string): boolean => {
+  const currentWeek = getWeekNumber(new Date());
+  return parseInt(weekNumber) < parseInt(currentWeek);
 };
 
 /**
@@ -155,7 +170,15 @@ export const isWeeklyChallengeActive = (): boolean => {
 export const getNextMondayUTC = (): Date => {
   const now = new Date();
   const day = now.getUTCDay(); // 0 = Sunday, 1 = Monday
-  const daysUntilMonday = day === 1 ? 7 : (8 - day) % 7;
+  let daysUntilMonday;
+  
+  if (day === 1) { // Monday
+    daysUntilMonday = 7; // Next Monday is 7 days away
+  } else if (day === 0) { // Sunday
+    daysUntilMonday = 1; // Tomorrow is Monday
+  } else {
+    daysUntilMonday = 8 - day;
+  }
   
   const nextMonday = new Date(Date.UTC(
     now.getUTCFullYear(),
@@ -255,7 +278,7 @@ export const formatTimeRemaining = (milliseconds: number): string => {
   const remainingSeconds = seconds % 60;
   
   if (days > 0) {
-    return `${days}d ${remainingHours}h ${remainingMinutes}m`;
+    return `${days}d ${remainingHours}h`;
   } else if (hours > 0) {
     return `${hours}h ${remainingMinutes}m`;
   } else if (minutes > 0) {
@@ -267,11 +290,20 @@ export const formatTimeRemaining = (milliseconds: number): string => {
 
 /**
  * Get week number (for weekly challenges) - UTC-based
+ * Returns number as string for ID generation
  */
 export const getWeekNumber = (date: Date): string => {
   const firstDayOfYear = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
-  return Math.ceil((pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7).toString();
+  const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7);
+  return weekNum.toString();
+};
+
+/**
+ * Get week number as number
+ */
+export const getWeekNumberAsNumber = (date: Date): number => {
+  return parseInt(getWeekNumber(date));
 };
 
 /**
@@ -362,38 +394,37 @@ export const debugUTCTime = (): void => {
   console.log('  Daily remaining:', getDailyTimeRemaining());
   console.log('  Weekly active:', isWeeklyChallengeActive());
   console.log('  Weekly remaining:', getWeeklyTimeRemaining());
+  console.log('  Week number:', getWeekNumber(now));
   console.log('  =====================');
 };
 
 // =====================================================
-// CHALLENGE ID HELPER FUNCTIONS (NEW)
+// CHALLENGE ID HELPER FUNCTIONS
 // =====================================================
 
 /**
  * Get daily challenge ID with category and grid size
  * Format: daily-YYYY-MM-DD-category-gridSize
- * Example: daily-2024-01-15-animals-8
+ * Example: daily-2024-01-15-animals-8x8
  */
 export const getDailyChallengeId = (category: string, gridSize: string): string => {
   const date = getUTCDateString();
-  const sizeNumber = gridSize.replace('x', '');
-  return `daily-${date}-${category}-${sizeNumber}`;
+  return `daily-${date}-${category}-${gridSize}`;
 };
 
 /**
  * Get weekly challenge ID with category and grid size
  * Format: weekly-weekNumber-category-gridSize
- * Example: weekly-3-animals-8
+ * Example: weekly-3-animals-8x8
  */
 export const getWeeklyChallengeId = (category: string, gridSize: string): string => {
   const weekNumber = getWeekNumber(new Date());
-  const sizeNumber = gridSize.replace('x', '');
-  return `weekly-${weekNumber}-${category}-${sizeNumber}`;
+  return `weekly-${weekNumber}-${category}-${gridSize}`;
 };
 
 /**
  * Get challenge ID for a game based on when it started
- * Use this when saving results to ensure they go to the correct day
+ * Use this when saving results to ensure they go to the correct day/week
  */
 export const getChallengeIdForGame = (
   startTime: number, 
@@ -401,15 +432,13 @@ export const getChallengeIdForGame = (
   category: string,
   gridSize: string
 ): string => {
-  const sizeNumber = gridSize.replace('x', '');
-  
   if (challengeType === 'daily') {
     const date = getUTCDateStringForTimestamp(startTime);
-    return `daily-${date}-${category}-${sizeNumber}`;
+    return `daily-${date}-${category}-${gridSize}`;
   } else {
     const date = new Date(startTime);
     const weekNumber = getWeekNumber(date);
-    return `weekly-${weekNumber}-${category}-${sizeNumber}`;
+    return `weekly-${weekNumber}-${category}-${gridSize}`;
   }
 };
 

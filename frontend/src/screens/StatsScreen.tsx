@@ -8,6 +8,7 @@ import {
   Text,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -29,6 +30,8 @@ import {
   formatDate,
   formatTime,
 } from '../utils/formatters';
+import { auth, db } from '../services/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 type RootStackParamList = { Stats: undefined; Home: undefined; Profile: undefined };
 type StatsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -80,7 +83,7 @@ interface Achievement {
 const StatsScreen = () => {
   const navigation = useNavigation<StatsScreenNavigationProp>();
   const { theme } = useContext(ThemeContext);
-  const { profile, registerStatsRefresh } = useProfile();
+  const { profile, registerStatsRefresh, refreshProfile } = useProfile();
   const colors = themeStyles[theme];
 
   const [stats, setStats] = useState<ExtendedStats | null>(null);
@@ -135,15 +138,83 @@ const StatsScreen = () => {
     }
   };
 
-  const loadStats = () => {
-    if (!profile) {
-      console.log('❌ StatsScreen - No profile found');
+  // Direct Firebase fetch to ensure we have the latest data
+  const fetchStatsDirectlyFromFirebase = async () => {
+    const user = auth.currentUser;
+    if (!user) return null;
+    
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userRef);
+      
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        const statsData = data.stats || {};
+        
+        console.log('🔥 Direct Firebase fetch - Position Stats:', {
+          firstPlaceWins: statsData.firstPlaceWins,
+          secondPlaceWins: statsData.secondPlaceWins,
+          thirdPlaceWins: statsData.thirdPlaceWins,
+          dailyFirstPlace: statsData.dailyFirstPlace,
+          dailySecondPlace: statsData.dailySecondPlace,
+          dailyThirdPlace: statsData.dailyThirdPlace,
+          weeklyFirstPlace: statsData.weeklyFirstPlace,
+          weeklySecondPlace: statsData.weeklySecondPlace,
+          weeklyThirdPlace: statsData.weeklyThirdPlace,
+        });
+        
+        return statsData;
+      }
+    } catch (error) {
+      console.error('Error fetching from Firebase directly:', error);
+    }
+    return null;
+  };
+
+  const loadStats = async () => {
+    // First try to get direct Firebase data for position stats
+    const firebaseStats = await fetchStatsDirectlyFromFirebase();
+    
+    if (!profile && !firebaseStats) {
+      console.log('❌ StatsScreen - No profile or Firebase data found');
       return;
     }
 
-    const p = profile.stats as any;
+    // Use profile stats as base, but override with direct Firebase data for position stats
+    const p = profile?.stats as any || {};
+    const fb = firebaseStats || {};
     
-    console.log('📊 StatsScreen - Loading stats:', p);
+    console.log('📊 StatsScreen - Loading stats from:', {
+      fromProfile: {
+        firstPlaceWins: p.firstPlaceWins,
+        dailyFirstPlace: p.dailyFirstPlace,
+        weeklyFirstPlace: p.weeklyFirstPlace,
+      },
+      fromFirebase: {
+        firstPlaceWins: fb.firstPlaceWins,
+        dailyFirstPlace: fb.dailyFirstPlace,
+        weeklyFirstPlace: fb.weeklyFirstPlace,
+      }
+    });
+    
+    // Use Firebase data for position stats (more reliable), fallback to profile
+    const firstPlaceWins = fb.firstPlaceWins ?? p.firstPlaceWins ?? 0;
+    const secondPlaceWins = fb.secondPlaceWins ?? p.secondPlaceWins ?? 0;
+    const thirdPlaceWins = fb.thirdPlaceWins ?? p.thirdPlaceWins ?? 0;
+    const dailyFirstPlace = fb.dailyFirstPlace ?? p.dailyFirstPlace ?? 0;
+    const dailySecondPlace = fb.dailySecondPlace ?? p.dailySecondPlace ?? 0;
+    const dailyThirdPlace = fb.dailyThirdPlace ?? p.dailyThirdPlace ?? 0;
+    const weeklyFirstPlace = fb.weeklyFirstPlace ?? p.weeklyFirstPlace ?? 0;
+    const weeklySecondPlace = fb.weeklySecondPlace ?? p.weeklySecondPlace ?? 0;
+    const weeklyThirdPlace = fb.weeklyThirdPlace ?? p.weeklyThirdPlace ?? 0;
+    
+    console.log('📊 Final position stats being set:', {
+      firstPlaceWins,
+      secondPlaceWins,
+      thirdPlaceWins,
+      dailyFirstPlace,
+      weeklyFirstPlace,
+    });
     
     const dailyScore = Math.min((p.dailyChallengesCompleted || 0) * 10, 100);
     const weeklyScore = Math.min((p.weeklyChallengesCompleted || 0) * 50, 500);
@@ -170,16 +241,16 @@ const StatsScreen = () => {
       totalCorrectMoves: p.totalCorrectMoves ?? 0,
       totalWrongMoves: p.totalWrongMoves ?? 0,
       
-      // Position stats
-      firstPlaceWins: p.firstPlaceWins ?? 0,
-      secondPlaceWins: p.secondPlaceWins ?? 0,
-      thirdPlaceWins: p.thirdPlaceWins ?? 0,
-      dailyFirstPlace: p.dailyFirstPlace ?? 0,
-      dailySecondPlace: p.dailySecondPlace ?? 0,
-      dailyThirdPlace: p.dailyThirdPlace ?? 0,
-      weeklyFirstPlace: p.weeklyFirstPlace ?? 0,
-      weeklySecondPlace: p.weeklySecondPlace ?? 0,
-      weeklyThirdPlace: p.weeklyThirdPlace ?? 0,
+      // Position stats from Firebase
+      firstPlaceWins,
+      secondPlaceWins,
+      thirdPlaceWins,
+      dailyFirstPlace,
+      dailySecondPlace,
+      dailyThirdPlace,
+      weeklyFirstPlace,
+      weeklySecondPlace,
+      weeklyThirdPlace,
     });
 
     setLoading(false);
@@ -191,7 +262,7 @@ const StatsScreen = () => {
       return;
     }
 
-    const stats = profile.stats as any;
+    const statsData = stats || profile.stats as any;
 
     const mappedAchievements: Achievement[] = profile.trophies.map(t => {
       let progress = 0;
@@ -213,39 +284,39 @@ const StatsScreen = () => {
         const reqType = t.requirement.type as string;
         
         if (reqType === 'puzzles_completed') {
-          progress = stats.puzzlesSolved || 0;
+          progress = statsData.puzzlesCompleted || statsData.puzzlesSolved || 0;
         } else if (reqType === 'daily_challenges') {
-          progress = stats.dailyChallengesCompleted || 0;
+          progress = statsData.dailyChallengesCompleted || 0;
         } else if (reqType === 'weekly_challenges') {
-          progress = stats.weeklyChallengesCompleted || 0;
+          progress = statsData.weeklyChallengesCompleted || 0;
         } else if (reqType === 'accuracy') {
-          progress = stats.accuracy || 0;
+          progress = statsData.accuracy || 0;
         } else if (reqType === 'streak' || reqType === 'current_streak') {
-          progress = stats.currentStreak || 0;
+          progress = statsData.currentStreak || 0;
         } else if (reqType === 'longest_streak') {
-          progress = stats.longestStreak || stats.currentStreak || 0;
+          progress = statsData.longestStreak || statsData.currentStreak || 0;
         } else if (reqType === 'perfect_games') {
-          progress = stats.perfectGames || 0;
+          progress = statsData.perfectGames || 0;
         } else if (reqType === 'daily_play') {
-          progress = stats.totalPlayDays || 0;
+          progress = statsData.totalPlayDays || 0;
         } else if (reqType === 'weekend_play') {
-          progress = stats.weekendPuzzles || 0;
+          progress = statsData.weekendPuzzles || 0;
         } else if (reqType === 'total_play_time') {
-          progress = stats.totalPlayTime || 0;
+          progress = statsData.totalPlayTime || 0;
         } else if (reqType === 'total_moves') {
-          progress = stats.totalMoves || 0;
+          progress = statsData.totalMoves || 0;
         } else if (reqType === 'first_place') {
-          progress = stats.firstPlaceWins || 0;
+          progress = statsData.firstPlaceWins || 0;
         } else if (reqType === 'second_place') {
-          progress = stats.secondPlaceWins || 0;
+          progress = statsData.secondPlaceWins || 0;
         } else if (reqType === 'third_place') {
-          progress = stats.thirdPlaceWins || 0;
+          progress = statsData.thirdPlaceWins || 0;
         } else if (reqType === 'daily_first_place') {
-          progress = stats.dailyFirstPlace || 0;
+          progress = statsData.dailyFirstPlace || 0;
         } else if (reqType === 'weekly_first_place') {
-          progress = stats.weeklyFirstPlace || 0;
+          progress = statsData.weeklyFirstPlace || 0;
         } else if (reqType === 'speed_demon' || reqType === 'speed_legend') {
-          progress = stats.bestTime <= t.requirement.value ? 1 : 0;
+          progress = statsData.bestTime <= t.requirement.value ? 1 : 0;
         }
       }
 
@@ -278,15 +349,60 @@ const StatsScreen = () => {
     return achievements.filter(a => a.category === selectedAchievementTab);
   };
 
-  const handleRefresh = () => {
-    setRefreshKey(prev => prev + 1);
+  const handleRefresh = async () => {
     setLoading(true);
-    loadStats();
+    await refreshProfile();
+    await loadStats();
     loadAchievements();
+    setRefreshKey(prev => prev + 1);
   };
 
   const handleNewPuzzle = () => {
     navigation.navigate('Home');
+  };
+
+  // Debug function to check Firebase data directly
+  const checkFirebaseData = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert('Debug', 'No user logged in');
+      return;
+    }
+    
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userRef);
+      
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        const statsData = data.stats || {};
+        
+        Alert.alert(
+          'Firebase Stats Data',
+          `🏆 Overall Podium:\n` +
+          `🥇 1st: ${statsData.firstPlaceWins || 0}\n` +
+          `🥈 2nd: ${statsData.secondPlaceWins || 0}\n` +
+          `🥉 3rd: ${statsData.thirdPlaceWins || 0}\n\n` +
+          `📅 Daily Challenge:\n` +
+          `🥇 1st: ${statsData.dailyFirstPlace || 0}\n` +
+          `🥈 2nd: ${statsData.dailySecondPlace || 0}\n` +
+          `🥉 3rd: ${statsData.dailyThirdPlace || 0}\n\n` +
+          `📆 Weekly Challenge:\n` +
+          `🥇 1st: ${statsData.weeklyFirstPlace || 0}\n` +
+          `🥈 2nd: ${statsData.weeklySecondPlace || 0}\n` +
+          `🥉 3rd: ${statsData.weeklyThirdPlace || 0}\n\n` +
+          `📈 Other Stats:\n` +
+          `Puzzles Solved: ${statsData.puzzlesSolved || 0}\n` +
+          `Daily Completed: ${statsData.dailyChallengesCompleted || 0}\n` +
+          `Weekly Completed: ${statsData.weeklyChallengesCompleted || 0}`
+        );
+      } else {
+        Alert.alert('Debug', 'No user document found');
+      }
+    } catch (error) {
+      console.error('Error checking Firebase:', error);
+      Alert.alert('Error', 'Failed to read from Firebase');
+    }
   };
 
   if (loading || !stats) {
@@ -304,11 +420,14 @@ const StatsScreen = () => {
   const totalAchievements = achievements.length;
   const filteredAchievements = filterAchievements();
 
-  // Calculate podium percentages
+  // Calculate podium percentages for bar heights
   const totalWins = stats.firstPlaceWins + stats.secondPlaceWins + stats.thirdPlaceWins;
   const firstPlacePercent = totalWins > 0 ? (stats.firstPlaceWins / totalWins) * 100 : 0;
   const secondPlacePercent = totalWins > 0 ? (stats.secondPlaceWins / totalWins) * 100 : 0;
   const thirdPlacePercent = totalWins > 0 ? (stats.thirdPlaceWins / totalWins) * 100 : 0;
+  
+  // Determine if user has any podium finishes
+  const hasPodiumFinishes = totalWins > 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -324,9 +443,14 @@ const StatsScreen = () => {
               {profile?.name ? `${profile.name}'s Stats` : 'Your Stats'}
             </Text>
           </View>
-          <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
-            <Text style={[styles.refreshButtonText, { color: colors.text }]}>🔄</Text>
-          </TouchableOpacity>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity style={styles.firebaseButton} onPress={checkFirebaseData}>
+              <Text style={{ color: colors.text, fontSize: 14 }}>🔥</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
+              <Text style={[styles.refreshButtonText, { color: colors.text }]}>🔄</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Tabs */}
@@ -408,97 +532,114 @@ const StatsScreen = () => {
               </StatsGrid>
             </StatSection>
 
-            {/* Top Finishes Section - Enhanced */}
+            {/* Top Finishes Section */}
             <StatSection title="🥇 Top Finishes" textColor={colors.text}>
               <View style={[styles.positionContainer, { backgroundColor: colors.button }]}>
-                {/* Main Podium Display */}
-                <View style={styles.podiumContainer}>
-                  <View style={styles.podiumRow}>
-                    {/* 2nd Place */}
-                    <View style={[styles.podiumItem, styles.podiumSecond]}>
-                      <Text style={styles.podiumEmoji}>🥈</Text>
-                      <Text style={[styles.podiumNumber, { color: colors.text }]}>{stats.secondPlaceWins}</Text>
-                      <Text style={[styles.podiumLabel, { color: colors.text }]}>2nd Place</Text>
-                      <View style={[styles.podiumBar, { height: Math.min(80, secondPlacePercent / 2), backgroundColor: '#C0C0C0' }]} />
-                    </View>
-                    
-                    {/* 1st Place (Highlighted) */}
-                    <View style={[styles.podiumItem, styles.podiumFirst]}>
-                      <Text style={styles.podiumEmoji}>🥇</Text>
-                      <Text style={[styles.podiumNumber, { color: colors.text, fontSize: 32 }]}>{stats.firstPlaceWins}</Text>
-                      <Text style={[styles.podiumLabel, { color: colors.text }]}>1st Place</Text>
-                      <View style={[styles.podiumBar, { height: Math.min(120, firstPlacePercent), backgroundColor: '#FFD700' }]} />
-                    </View>
-                    
-                    {/* 3rd Place */}
-                    <View style={[styles.podiumItem, styles.podiumThird]}>
-                      <Text style={styles.podiumEmoji}>🥉</Text>
-                      <Text style={[styles.podiumNumber, { color: colors.text }]}>{stats.thirdPlaceWins}</Text>
-                      <Text style={[styles.podiumLabel, { color: colors.text }]}>3rd Place</Text>
-                      <View style={[styles.podiumBar, { height: Math.min(60, thirdPlacePercent / 2), backgroundColor: '#CD7F32' }]} />
-                    </View>
-                  </View>
-                </View>
-
-                {/* Total Wins Badge */}
-                {totalWins > 0 && (
-                  <View style={styles.totalWinsBadge}>
-                    <Text style={styles.totalWinsEmoji}>🏆</Text>
-                    <Text style={[styles.totalWinsText, { color: colors.text }]}>
-                      Total Podium Finishes: {totalWins}
+                {!hasPodiumFinishes ? (
+                  // Empty state when no podium finishes yet
+                  <View style={styles.emptyPodiumContainer}>
+                    <Text style={[styles.emptyPodiumEmoji, { color: colors.text }]}>🏆</Text>
+                    <Text style={[styles.emptyPodiumTitle, { color: colors.text }]}>No Podium Finishes Yet</Text>
+                    <Text style={[styles.emptyPodiumText, { color: colors.text, opacity: 0.7 }]}>
+                      Complete daily or weekly challenges and rank in the top 3 to see your achievements here!
                     </Text>
+                    <TouchableOpacity 
+                      style={[styles.playNowSmallButton, { backgroundColor: '#4CAF50' }]}
+                      onPress={handleNewPuzzle}
+                    >
+                      <Text style={styles.playNowSmallText}>Play Now</Text>
+                    </TouchableOpacity>
                   </View>
-                )}
+                ) : (
+                  <>
+                    {/* Main Podium Display */}
+                    <View style={styles.podiumContainer}>
+                      <View style={styles.podiumRow}>
+                        {/* 2nd Place */}
+                        <View style={[styles.podiumItem, styles.podiumSecond]}>
+                          <Text style={styles.podiumEmoji}>🥈</Text>
+                          <Text style={[styles.podiumNumber, { color: colors.text }]}>{stats.secondPlaceWins}</Text>
+                          <Text style={[styles.podiumLabel, { color: colors.text }]}>2nd Place</Text>
+                          <View style={[styles.podiumBar, { height: Math.min(80, secondPlacePercent / 2), backgroundColor: '#C0C0C0' }]} />
+                        </View>
+                        
+                        {/* 1st Place (Highlighted) */}
+                        <View style={[styles.podiumItem, styles.podiumFirst]}>
+                          <Text style={styles.podiumEmoji}>🥇</Text>
+                          <Text style={[styles.podiumNumber, { color: colors.text, fontSize: 32, fontWeight: 'bold' }]}>{stats.firstPlaceWins}</Text>
+                          <Text style={[styles.podiumLabel, { color: colors.text, fontWeight: 'bold' }]}>1st Place</Text>
+                          <View style={[styles.podiumBar, { height: Math.min(120, firstPlacePercent), backgroundColor: '#FFD700' }]} />
+                        </View>
+                        
+                        {/* 3rd Place */}
+                        <View style={[styles.podiumItem, styles.podiumThird]}>
+                          <Text style={styles.podiumEmoji}>🥉</Text>
+                          <Text style={[styles.podiumNumber, { color: colors.text }]}>{stats.thirdPlaceWins}</Text>
+                          <Text style={[styles.podiumLabel, { color: colors.text }]}>3rd Place</Text>
+                          <View style={[styles.podiumBar, { height: Math.min(60, thirdPlacePercent / 2), backgroundColor: '#CD7F32' }]} />
+                        </View>
+                      </View>
+                    </View>
 
-                {/* Separator */}
-                <View style={styles.positionDivider} />
+                    {/* Total Wins Badge */}
+                    <View style={styles.totalWinsBadge}>
+                      <Text style={styles.totalWinsEmoji}>🏆</Text>
+                      <Text style={[styles.totalWinsText, { color: colors.text }]}>
+                        Total Podium Finishes: {totalWins}
+                      </Text>
+                    </View>
 
-                {/* Detailed Breakdown by Challenge Type */}
-                <Text style={[styles.breakdownTitle, { color: colors.text }]}>Breakdown by Challenge</Text>
-                
-                <View style={styles.challengeBreakdown}>
-                  {/* Daily Challenge Positions */}
-                  <View style={styles.breakdownColumn}>
-                    <Text style={[styles.breakdownHeader, { color: colors.text }]}>📅 Daily</Text>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownEmoji}>🥇</Text>
-                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailyFirstPlace}</Text>
-                    </View>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownEmoji}>🥈</Text>
-                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailySecondPlace}</Text>
-                    </View>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownEmoji}>🥉</Text>
-                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailyThirdPlace}</Text>
-                    </View>
-                  </View>
+                    {/* Separator */}
+                    <View style={styles.positionDivider} />
 
-                  {/* Weekly Challenge Positions */}
-                  <View style={styles.breakdownColumn}>
-                    <Text style={[styles.breakdownHeader, { color: colors.text }]}>📆 Weekly</Text>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownEmoji}>🥇</Text>
-                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklyFirstPlace}</Text>
-                    </View>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownEmoji}>🥈</Text>
-                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklySecondPlace}</Text>
-                    </View>
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownEmoji}>🥉</Text>
-                      <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklyThirdPlace}</Text>
-                    </View>
-                  </View>
-                </View>
+                    {/* Detailed Breakdown by Challenge Type */}
+                    <Text style={[styles.breakdownTitle, { color: colors.text }]}>Breakdown by Challenge</Text>
+                    
+                    <View style={styles.challengeBreakdown}>
+                      {/* Daily Challenge Positions */}
+                      <View style={styles.breakdownColumn}>
+                        <Text style={[styles.breakdownHeader, { color: colors.text }]}>📅 Daily</Text>
+                        <View style={styles.breakdownRow}>
+                          <Text style={styles.breakdownEmoji}>🥇</Text>
+                          <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailyFirstPlace}</Text>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                          <Text style={styles.breakdownEmoji}>🥈</Text>
+                          <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailySecondPlace}</Text>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                          <Text style={styles.breakdownEmoji}>🥉</Text>
+                          <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.dailyThirdPlace}</Text>
+                        </View>
+                      </View>
 
-                {/* Achievement Progress Tips */}
-                {stats.firstPlaceWins < 5 && (
-                  <View style={styles.tipContainer}>
-                    <Text style={[styles.tipText, { color: colors.text, opacity: 0.7 }]}>
-                      💡 Tip: Complete {5 - stats.firstPlaceWins} more 1st place finishes to unlock the "Rising Champion" achievement!
-                    </Text>
-                  </View>
+                      {/* Weekly Challenge Positions */}
+                      <View style={styles.breakdownColumn}>
+                        <Text style={[styles.breakdownHeader, { color: colors.text }]}>📆 Weekly</Text>
+                        <View style={styles.breakdownRow}>
+                          <Text style={styles.breakdownEmoji}>🥇</Text>
+                          <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklyFirstPlace}</Text>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                          <Text style={styles.breakdownEmoji}>🥈</Text>
+                          <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklySecondPlace}</Text>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                          <Text style={styles.breakdownEmoji}>🥉</Text>
+                          <Text style={[styles.breakdownValue, { color: colors.text }]}>{stats.weeklyThirdPlace}</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Achievement Progress Tips */}
+                    {stats.firstPlaceWins < 5 && stats.firstPlaceWins > 0 && (
+                      <View style={styles.tipContainer}>
+                        <Text style={[styles.tipText, { color: colors.text, opacity: 0.7 }]}>
+                          💡 Tip: Complete {5 - stats.firstPlaceWins} more 1st place finishes to unlock the "Rising Champion" achievement!
+                        </Text>
+                      </View>
+                    )}
+                  </>
                 )}
               </View>
             </StatSection>
@@ -753,6 +894,14 @@ const styles = StyleSheet.create({
     opacity: 0.8, 
     marginTop: 2 
   },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  firebaseButton: {
+    padding: 8,
+  },
   refreshButton: { 
     padding: 8 
   },
@@ -766,11 +915,41 @@ const styles = StyleSheet.create({
   contentContainer: {
     paddingHorizontal: 20,
   },
-  // Enhanced Position styles
+  // Position styles
   positionContainer: {
     borderRadius: 12,
     padding: 16,
     marginTop: 8,
+  },
+  emptyPodiumContainer: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyPodiumEmoji: {
+    fontSize: 48,
+    marginBottom: 12,
+    opacity: 0.5,
+  },
+  emptyPodiumTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  emptyPodiumText: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  playNowSmallButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  playNowSmallText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   podiumContainer: {
     marginBottom: 16,
@@ -880,7 +1059,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
   },
-  // Achievement tab styles
   achievementTabContainer: {
     flexDirection: 'row',
     marginBottom: 16,

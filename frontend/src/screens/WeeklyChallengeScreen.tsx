@@ -28,6 +28,7 @@ import {
 import { auth } from "../services/firebase";
 import AppFooter from "../components/common/AppFooter";
 import ChallengeLeaderboard from "../components/challenges/ChallengeLeaderboard";
+import { ChallengeCategory } from "../types/challenge";
 
 type RootStackParamList = {
   Play: {
@@ -93,16 +94,19 @@ const WeeklyChallengeScreen = () => {
   const [currentUTCTime, setCurrentUTCTime] = useState(formatUTCDateTime());
   const [currentLocalTime, setCurrentLocalTime] = useState(formatLocalDateTime());
   
-  // State for challenge name
+  // State for challenge name and emoji
   const [challengeName, setChallengeName] = useState('');
+  const [challengeEmoji, setChallengeEmoji] = useState('');
   
   const timeUpdateRef = React.useRef<number | null>(null);
   
   const selectedCategory = (settings as any).category || 'animals';
+  const category = selectedCategory as ChallengeCategory;
+  const currentGridSize = settings.gridSize || '8x8';
   const weekNumber = getWeekNumberUTC(new Date());
+  // Fix: Remove gridSize from challenge ID to match what's saved in PlayScreen
   const challengeId = `weekly-${weekNumber}-${selectedCategory}`;
   const challengeActive = isWeeklyChallengeActive();
-  const currentGridSize = settings.gridSize || '8x8';
 
   // Use context for completion status
   const hasPlayed = weeklyCompletion.completed;
@@ -112,15 +116,22 @@ const WeeklyChallengeScreen = () => {
   const isExpired = !challengeActive;
   const isUrgent = !isExpired && (timeRemaining.includes('0d') || (timeRemaining.includes('1d') && !timeRemaining.includes('Expired')));
 
-  // Load challenge name from service
+  // Load challenge name and emoji from service
   const loadChallengeName = async () => {
     try {
-      const name = await challengeService.getCurrentChallengeName('weekly', currentGridSize);
-      setChallengeName(name);
-      console.log('📛 Weekly challenge name loaded:', name);
+      // Get full metadata with emoji
+      const metadata = await challengeService.getChallengeMetadata('weekly', currentGridSize, category);
+      setChallengeName(metadata.name);
+      setChallengeEmoji(metadata.challengeEmoji);
+      console.log('📛 Weekly challenge loaded:', { 
+        name: metadata.name, 
+        emoji: metadata.challengeEmoji,
+        challengeId 
+      });
     } catch (error) {
       console.error('Error loading challenge name:', error);
       setChallengeName('Weekly Challenge');
+      setChallengeEmoji('📆');
     }
   };
 
@@ -155,12 +166,19 @@ const WeeklyChallengeScreen = () => {
         setUserRank(rank);
         console.log('🏆 User weekly rank:', rank);
       }
+      
+      console.log('📊 Weekly challenge status:', {
+        challengeId,
+        hasPlayed,
+        completed: weeklyCompletion.completed,
+        result: challengeResult
+      });
     } catch (error) {
       console.error('Error loading weekly challenge data:', error);
     } finally {
       setLoading(false);
     }
-  }, [challengeId, challengeActive, currentGridSize, selectedCategory, refreshChallengeStatus, hasPlayed]);
+  }, [challengeId, challengeActive, currentGridSize, selectedCategory, refreshChallengeStatus, hasPlayed, weeklyCompletion.completed]);
 
   // Refresh on focus
   useFocusEffect(
@@ -210,6 +228,7 @@ const WeeklyChallengeScreen = () => {
       wrongMoves: challengeResult?.wrongMoves,
       accuracy: challengeResult?.accuracy,
       completed: true,
+      completedAt: challengeResult?.completedAt,
     });
   };
 
@@ -276,10 +295,10 @@ const WeeklyChallengeScreen = () => {
         <View style={[styles.header, { backgroundColor: colors.button }]}>
           <Text style={[styles.title, { color: getContrastColor(colors.button) }]}>Weekly Challenge</Text>
           
-          {/* Challenge Name Display */}
+          {/* Challenge Name Display with Emoji */}
           <View style={styles.challengeNameContainer}>
             <Text style={[styles.challengeNameText, { color: getContrastColor(colors.button) }]}>
-              {challengeName || 'Loading...'}
+              {challengeEmoji} {challengeName || 'Loading...'}
             </Text>
           </View>
           
@@ -303,7 +322,7 @@ const WeeklyChallengeScreen = () => {
           
           <View style={styles.challengeHeader}>
             <Text style={[styles.challengeTitle, { color: getContrastColor(colors.button) }]}>
-              {challengeName || 'Weekly Challenge'}
+              {challengeEmoji} {challengeName || 'Weekly Challenge'}
             </Text>
             <Text style={[styles.gridSizeBadge, { color: getContrastColor(colors.button), backgroundColor: 'rgba(255,255,255,0.2)' }]}>
               {settings.gridSize || '8x8'}
@@ -329,7 +348,7 @@ const WeeklyChallengeScreen = () => {
             </View>
             <View style={styles.statBox}>
               <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>Time Left</Text>
-              <Text style={[styles.timer, { color: isUrgent ? '#FF5722' : '#1565C0' }]}>⏰ {timeRemaining}</Text>
+              <Text style={[styles.timer, { color: isUrgent ? '#FF5722' : '#4CAF50' }]}>⏰ {timeRemaining}</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={[styles.statLabel, { color: getContrastColor(colors.button), opacity: 0.7 }]}>Players</Text>
@@ -338,7 +357,7 @@ const WeeklyChallengeScreen = () => {
           </View>
 
           {hasPlayed && (
-            <View style={[styles.completedContainer, { backgroundColor: 'rgba(255,255,255,0.1)' }]}>
+            <View style={[styles.completedContainer, { backgroundColor: 'rgba(76, 175, 80, 0.2)' }]}>
               <Text style={[styles.completedText, { color: '#4CAF50' }]}>✅ Weekly Challenge Completed!</Text>
               {challengeResult?.bestTime && (
                 <Text style={[styles.bestTime, { color: getContrastColor(colors.button) }]}>Best Time: {formatTimeDisplay(challengeResult.bestTime)}</Text>

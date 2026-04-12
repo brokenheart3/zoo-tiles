@@ -1,4 +1,4 @@
-// src/services/userService.ts
+// src/services/userService.ts (fixed)
 import { db } from "./firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { User } from "firebase/auth";
@@ -68,18 +68,33 @@ export const getDailyChallenge = async () => {
   return null;
 };
 
-// ✅ FIXED: Get user's challenge result
+// ✅ FIXED: Get user's challenge result from the correct path
 export const getUserChallengeResult = async (uid: string, challengeId: string) => {
   console.log('🔍 getUserChallengeResult:', { uid, challengeId });
   try {
-    const challengeRef = doc(db, "users", uid, "challenges", challengeId);
-    const snapshot = await getDoc(challengeRef);
+    // Try both possible paths
+    let result = null;
     
-    if (snapshot.exists()) {
-      const data = snapshot.data();
-      console.log('✅ Found challenge:', { challengeId, completed: data.completed, bestTime: data.bestTime });
-      return data;
+    // Path 1: users/{uid}/challenges/{challengeId}
+    const userChallengeRef = doc(db, "users", uid, "challenges", challengeId);
+    const userChallengeSnapshot = await getDoc(userChallengeRef);
+    
+    if (userChallengeSnapshot.exists()) {
+      result = userChallengeSnapshot.data();
+      console.log('✅ Found challenge in users/{uid}/challenges:', { challengeId, completed: result.completed, bestTime: result.bestTime });
+      return result;
     }
+    
+    // Path 2: challenges/{challengeId}/participations/{uid}
+    const participationRef = doc(db, "challenges", challengeId, "participations", uid);
+    const participationSnapshot = await getDoc(participationRef);
+    
+    if (participationSnapshot.exists()) {
+      result = participationSnapshot.data();
+      console.log('✅ Found challenge in challenges/{challengeId}/participations:', { challengeId, completed: result.completed, bestTime: result.bestTime });
+      return result;
+    }
+    
     console.log('❌ No challenge found for:', challengeId);
     return null;
   } catch (error) {
@@ -103,7 +118,7 @@ export const getUserAllChallenges = async (uid: string) => {
   }
 };
 
-// ✅ FIXED: Update user's challenge progress
+// ✅ FIXED: Update user's challenge progress in both locations
 export const updateUserChallenge = async (
   uid: string,
   challengeId: string,
@@ -123,9 +138,11 @@ export const updateUserChallenge = async (
       await LocalStorageService.recordDailyChallenge(completed, time || 0, completed ? 100 : 0);
     }
 
-    // Update Firebase
-    const challengeRef = doc(db, "users", uid, "challenges", challengeId);
-    const snapshot = await getDoc(challengeRef);
+    const challengeType = challengeId.startsWith('daily-') ? 'daily' : 'weekly';
+    
+    // Update in users/{uid}/challenges/{challengeId}
+    const userChallengeRef = doc(db, "users", uid, "challenges", challengeId);
+    const snapshot = await getDoc(userChallengeRef);
 
     const attempts = snapshot.exists() ? (snapshot.data()?.attempts || 0) + 1 : 1;
     
@@ -151,15 +168,60 @@ export const updateUserChallenge = async (
       accuracy: accuracy || 0,
       isPerfect: isPerfect || false,
       completedAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      challengeType: challengeType,
+      challengeId: challengeId
     };
     
-    console.log('📝 Saving to Firebase:', data);
-    await setDoc(challengeRef, data, { merge: true });
+    console.log('📝 Saving to users/{uid}/challenges:', data);
+    await setDoc(userChallengeRef, data, { merge: true });
+    
+    // Also update in challenges/{challengeId}/participations/{uid}
+    const participationRef = doc(db, "challenges", challengeId, "participations", uid);
+    const participationData = {
+      userId: uid,
+      challengeId: challengeId,
+      challengeType: challengeType,
+      completed: true,
+      score: bestTime || time || 0,
+      bestTime: bestTime || time || 0,
+      time: time || 0,
+      moves: moves || 0,
+      correctMoves: correctMoves || 0,
+      wrongMoves: wrongMoves || 0,
+      accuracy: accuracy || 0,
+      isPerfect: isPerfect || false,
+      completedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+      _score: bestTime || time || 0
+    };
+    
+    console.log('📝 Saving to challenges/{challengeId}/participations:', participationData);
+    await setDoc(participationRef, participationData, { merge: true });
+    
+    // Update user's stats for weekly/daily completion counts
+    const userRef = doc(db, "users", uid);
+    const userDoc = await getDoc(userRef);
+    
+    if (userDoc.exists()) {
+      const stats = userDoc.data()?.stats || {};
+      const updateFields: any = {};
+      
+      if (challengeType === 'daily') {
+        updateFields['stats.dailyCompleted'] = (stats.dailyCompleted || 0) + 1;
+      } else {
+        updateFields['stats.weeklyCompleted'] = (stats.weeklyCompleted || 0) + 1;
+      }
+      updateFields['stats.challengesCompleted'] = (stats.challengesCompleted || 0) + 1;
+      updateFields.lastActive = new Date();
+      
+      await updateDoc(userRef, updateFields);
+    }
+    
     console.log('✅ updateUserChallenge SUCCESS');
 
     // Verify save
-    const verify = await getDoc(challengeRef);
+    const verify = await getDoc(userChallengeRef);
     console.log('🔍 Verification - Saved data:', verify.data());
     
     return true;
@@ -171,44 +233,70 @@ export const updateUserChallenge = async (
 
 export const getPlayerRank = async (challengeId: string, userId: string): Promise<number | null> => {
   try {
-    const userChallengeRef = doc(db, 'users', userId, 'challenges', challengeId);
-    const userChallengeDoc = await getDoc(userChallengeRef);
+    // First check the participation collection
+    const participationsRef = collection(db, "challenges", challengeId, "participations");
+    const participationsSnapshot = await getDocs(participationsRef);
     
-    if (!userChallengeDoc.exists()) return null;
+    let userTime: number | null = null;
+    const allTimes: { userId: string; time: number }[] = [];
     
-    const userData = userChallengeDoc.data();
-    if (!userData.completed) return null;
-    
-    const userTime = userData.bestTime || userData.time;
-    if (!userTime || userTime <= 0) return null;
-    
-    const usersRef = collection(db, 'users');
-    const usersSnapshot = await getDocs(usersRef);
-    
-    let fasterPlayersCount = 0;
-    
-    for (const userDoc of usersSnapshot.docs) {
-      if (userDoc.id === userId) continue;
-      
-      try {
-        const challengeRef = doc(db, 'users', userDoc.id, 'challenges', challengeId);
-        const challengeDoc = await getDoc(challengeRef);
-        
-        if (challengeDoc.exists()) {
-          const data = challengeDoc.data();
-          if (data.completed === true) {
-            const otherTime = data.bestTime || data.time;
-            if (otherTime && otherTime > 0 && otherTime < userTime) {
-              fasterPlayersCount++;
-            }
-          }
+    for (const doc of participationsSnapshot.docs) {
+      const data = doc.data();
+      const time = data.bestTime || data.time || data._score;
+      if (time && time > 0) {
+        allTimes.push({ userId: doc.id, time: time });
+        if (doc.id === userId) {
+          userTime = time;
         }
-      } catch (err) {
-        continue;
       }
     }
     
-    return fasterPlayersCount + 1;
+    if (!userTime) {
+      // Fallback to old method
+      const userChallengeRef = doc(db, 'users', userId, 'challenges', challengeId);
+      const userChallengeDoc = await getDoc(userChallengeRef);
+      
+      if (!userChallengeDoc.exists()) return null;
+      
+      const userData = userChallengeDoc.data();
+      if (!userData.completed) return null;
+      
+      userTime = userData.bestTime || userData.time;
+      if (!userTime || userTime <= 0) return null;
+      
+      const usersRef = collection(db, 'users');
+      const usersSnapshot = await getDocs(usersRef);
+      
+      let fasterPlayersCount = 0;
+      
+      for (const userDoc of usersSnapshot.docs) {
+        if (userDoc.id === userId) continue;
+        
+        try {
+          const challengeRef = doc(db, 'users', userDoc.id, 'challenges', challengeId);
+          const challengeDoc = await getDoc(challengeRef);
+          
+          if (challengeDoc.exists()) {
+            const data = challengeDoc.data();
+            if (data.completed === true) {
+              const otherTime = data.bestTime || data.time;
+              if (otherTime && otherTime > 0 && otherTime < userTime) {
+                fasterPlayersCount++;
+              }
+            }
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+      
+      return fasterPlayersCount + 1;
+    }
+    
+    // Calculate rank from participation collection
+    const fasterPlayers = allTimes.filter(t => t.time < userTime!).length;
+    return fasterPlayers + 1;
+    
   } catch (error) {
     console.error('Error in getPlayerRank:', error);
     return null;
@@ -217,10 +305,34 @@ export const getPlayerRank = async (challengeId: string, userId: string): Promis
 
 export const getTopPlayers = async (challengeId: string, limit: number = 10): Promise<any[]> => {
   try {
-    const usersRef = collection(db, 'users');
-    const usersSnapshot = await getDocs(usersRef);
+    // First try to get from participation collection
+    const participationsRef = collection(db, "challenges", challengeId, "participations");
+    const participationsSnapshot = await getDocs(participationsRef);
     
     const completions: any[] = [];
+    
+    for (const doc of participationsSnapshot.docs) {
+      const data = doc.data();
+      const completionTime = data.bestTime || data.time || data._score;
+      
+      if (data.completed === true && completionTime && completionTime > 0) {
+        completions.push({
+          userId: doc.id,
+          time: completionTime,
+          name: data.displayName || 'Anonymous',
+          avatar: '😎'
+        });
+      }
+    }
+    
+    if (completions.length > 0) {
+      completions.sort((a, b) => a.time - b.time);
+      return completions.slice(0, limit);
+    }
+    
+    // Fallback to old method
+    const usersRef = collection(db, 'users');
+    const usersSnapshot = await getDocs(usersRef);
     
     for (const userDoc of usersSnapshot.docs) {
       try {
