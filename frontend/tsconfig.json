@@ -5,10 +5,7 @@
     "moduleResolution": "bundler",
     "target": "ESNext",
     "module": "ESNext",
-    "lib": [
-      "ESNext",
-      "DOM"
-    ],
+    "lib": ["ESNext", "DOM"],
     "allowJs": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
@@ -16,34 +13,13 @@
     "noEmit": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-
-    // ✅ FIX: silence TypeScript deprecation warning
-    "ignoreDeprecations": "6.0",
-
-    // keep this for Expo compatibility
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    },
-
-    "types": [
-      "react",
-      "react-native"
-    ]
+    
+    // Remove baseUrl and paths entirely
+    // Use relative imports instead of @/ aliases
+    
+    "types": ["react", "react-native"]
   },
   "extends": "expo/tsconfig.base",
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "src/types/**/*.d.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "babel.config.js",
-    "metro.config.js"
-  ]
+  "include": ["**/*.ts", "**/*.tsx", "src/**/*.ts", "src/**/*.tsx", "src/types/**/*.d.ts"],
+  "exclude": ["node_modules", "babel.config.js", "metro.config.js", ".expo", "dist"]
 }

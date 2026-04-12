@@ -1,16 +1,18 @@
 // src/hooks/useChallengeTracker.ts
 import { useState, useEffect, useCallback } from 'react';
 import { challengeService } from '../services/challengeService';
-import type { ChallengeType, PlayerRank } from '../types/challenge';
+import type { ChallengeType, PlayerRank, ChallengeCategory } from '../types/challenge';
 
 interface UseChallengeTrackerProps {
   challengeType: ChallengeType;
+  category: ChallengeCategory;  // Add category parameter
   userId?: string;
   gridSize: string;
 }
 
 export function useChallengeTracker({
   challengeType,
+  category,  // Add category
   userId,
   gridSize
 }: UseChallengeTrackerProps) {
@@ -25,14 +27,17 @@ export function useChallengeTracker({
     const loadData = async () => {
       setLoading(true);
       try {
-        const count = await challengeService.getChallengePlayerCount(challengeType);
+        // Fix: Pass category parameter
+        const count = await challengeService.getChallengePlayerCount(challengeType, category);
         setPlayerCount(count);
         
-        const participated = await challengeService.hasPlayerParticipated(challengeType, userId);
+        // Fix: Pass category parameter
+        const participated = await challengeService.hasPlayerParticipated(challengeType, category, userId);
         setHasParticipated(participated);
         
         if (participated) {
-          const rank = await challengeService.getPlayerRank(challengeType, userId);
+          // Fix: Pass category parameter
+          const rank = await challengeService.getPlayerRank(challengeType, category, userId);
           setPlayerRank(rank);
         }
       } catch (error) {
@@ -43,7 +48,7 @@ export function useChallengeTracker({
     };
 
     loadData();
-  }, [challengeType, userId, gridSize]);
+  }, [challengeType, category, userId, gridSize]);
 
   const submitScore = useCallback(async (
     score: number,
@@ -52,10 +57,12 @@ export function useChallengeTracker({
   ) => {
     if (!userId) throw new Error('User ID required');
     
+    // Fix: Add category parameter
     const result = await challengeService.submitChallengeCompletion(
       userId,
       challengeType,
       gridSize,
+      category,  // Add category parameter
       score,
       displayName,
       photoURL
@@ -64,23 +71,26 @@ export function useChallengeTracker({
     setPlayerCount(result.playerCount);
     setHasParticipated(true);
     
-    const rank = await challengeService.getPlayerRank(challengeType, userId);
+    // Fix: Pass category parameter
+    const rank = await challengeService.getPlayerRank(challengeType, category, userId);
     setPlayerRank(rank);
     
     return result;
-  }, [userId, challengeType, gridSize]);
+  }, [userId, challengeType, category, gridSize]);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
     
-    const count = await challengeService.getChallengePlayerCount(challengeType);
+    // Fix: Pass category parameter
+    const count = await challengeService.getChallengePlayerCount(challengeType, category);
     setPlayerCount(count);
     
     if (hasParticipated) {
-      const rank = await challengeService.getPlayerRank(challengeType, userId);
+      // Fix: Pass category parameter
+      const rank = await challengeService.getPlayerRank(challengeType, category, userId);
       setPlayerRank(rank);
     }
-  }, [challengeType, userId, hasParticipated]);
+  }, [challengeType, category, userId, hasParticipated]);
 
   return {
     playerCount,

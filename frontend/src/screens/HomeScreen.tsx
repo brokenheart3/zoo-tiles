@@ -1,4 +1,4 @@
-// src/screens/HomeScreen.tsx
+// src/screens/HomeScreen.tsx - Add paywall integration
 import React, { useContext, useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
@@ -16,6 +16,7 @@ import { ThemeContext, themeStyles } from "../context/ThemeContext";
 import { useSettings } from "../context/SettingsContext";
 import { useProfile } from "../context/ProfileContext";
 import { useGameMode } from "../context/GameModeContext";
+import { useSubscription } from "../context/SubscriptionContext"; // Add this import
 import { goToPlay } from "../navigation/goToPlay";
 import { challengeService } from "../services/challengeService";
 
@@ -147,6 +148,8 @@ const HomeScreen: React.FC = () => {
     weeklyLockStatus,
     refreshChallengeStatus,
   } = useGameMode();
+  
+  const { isSubscribed, presentPaywall, trialDaysRemaining } = useSubscription(); // Add subscription hook
   
   const colors = themeStyles[theme];
   
@@ -283,6 +286,22 @@ const HomeScreen: React.FC = () => {
         emoji: weekItem.emoji,
       });
     }
+  };
+
+  // Check if user can access premium features
+  const checkPremiumAccess = async (featureName: string): Promise<boolean> => {
+    if (isSubscribed) return true;
+    
+    // Show paywall and wait for result
+    const subscribed = await presentPaywall();
+    if (!subscribed) {
+      Alert.alert(
+        'Premium Feature',
+        `Please subscribe to access ${featureName}. Start your 14-day free trial today!`
+      );
+      return false;
+    }
+    return true;
   };
 
   // Load stats from profile
@@ -500,13 +519,14 @@ const HomeScreen: React.FC = () => {
     return '#2E7D32';
   };
 
-  // Navigation handlers
-  const handleDailyChallengePress = () => {
+  // Navigation handlers with subscription check
+  const handleDailyChallengePress = async () => {
     console.log('Daily challenge pressed - Status:', {
       completed: dailyCompleted,
       isExpired: isDailyExpired,
       hasResult: !!dailyResultData,
       category: selectedCategory,
+      isSubscribed,
     });
     
     if (dailyCompleted && dailyResultData) {
@@ -533,6 +553,10 @@ const HomeScreen: React.FC = () => {
       return;
     }
     
+    // Check subscription for daily challenge
+    const canAccess = await checkPremiumAccess('Daily Challenges');
+    if (!canAccess) return;
+    
     goToPlay(navigation, 'daily', {
       gridSize: currentGridSize,
       difficulty: currentDifficulty,
@@ -540,12 +564,13 @@ const HomeScreen: React.FC = () => {
     });
   };
 
-  const handleWeeklyChallengePress = () => {
+  const handleWeeklyChallengePress = async () => {
     console.log('Weekly challenge pressed - Status:', {
       completed: weeklyCompleted,
       isExpired: isWeeklyExpired,
       hasResult: !!weeklyResultData,
       category: selectedCategory,
+      isSubscribed,
     });
     
     if (weeklyCompleted && weeklyResultData) {
@@ -572,6 +597,10 @@ const HomeScreen: React.FC = () => {
       return;
     }
     
+    // Check subscription for weekly challenge
+    const canAccess = await checkPremiumAccess('Weekly Challenges');
+    if (!canAccess) return;
+    
     goToPlay(navigation, 'weekly', {
       gridSize: currentGridSize,
       difficulty: currentDifficulty,
@@ -579,7 +608,11 @@ const HomeScreen: React.FC = () => {
     });
   };
 
-  const handleQuickPlayPress = () => {
+  const handleQuickPlayPress = async () => {
+    // Check subscription for quick play
+    const canAccess = await checkPremiumAccess('Quick Play');
+    if (!canAccess) return;
+    
     goToPlay(navigation, 'sequential', {
       gridSize: currentGridSize,
       difficulty: currentDifficulty,
@@ -672,7 +705,9 @@ const HomeScreen: React.FC = () => {
       `   Remaining: ${dailyRemaining}\n` +
       `   Category: ${getCategoryDisplayName(selectedCategory)}\n` +
       `   Grid Size: ${currentGridSize}\n` +
-      `   Difficulty: ${currentDifficulty}\n\n` +
+      `   Difficulty: ${currentDifficulty}\n` +
+      `   Subscribed: ${isSubscribed ? '✅ Yes' : '❌ No'}\n` +
+      `   Trial Days: ${trialDaysRemaining}\n\n` +
       `📆 Weekly Challenge:\n` +
       `   Display: ${weeklyChallenge.title}\n` +
       `   Title from service: ${weeklyChallengeState.title}\n` +
@@ -683,6 +718,30 @@ const HomeScreen: React.FC = () => {
       `   Category: ${getCategoryDisplayName(selectedCategory)}\n` +
       `   Grid Size: ${currentGridSize}\n` +
       `   Difficulty: ${currentDifficulty}`
+    );
+  };
+
+  // Trial banner component
+  const TrialBanner = () => {
+    if (isSubscribed || trialDaysRemaining <= 0) return null;
+    
+    return (
+      <TouchableOpacity 
+        style={[styles.trialBanner, { backgroundColor: colors.button }]}
+        onPress={async () => {
+          const subscribed = await presentPaywall();
+          if (subscribed) {
+            Alert.alert('Welcome to Premium!', 'Thank you for subscribing!');
+          }
+        }}
+      >
+        <Text style={[styles.trialBannerText, { color: getContrastColor(colors.button) }]}>
+          🎁 {trialDaysRemaining} day{trialDaysRemaining !== 1 ? 's' : ''} left in your free trial!
+        </Text>
+        <Text style={[styles.trialBannerSubtext, { color: getContrastColor(colors.button), opacity: 0.9 }]}>
+          Tap to upgrade to Premium
+        </Text>
+      </TouchableOpacity>
     );
   };
 
@@ -706,6 +765,9 @@ const HomeScreen: React.FC = () => {
             <Text style={{ color: colors.text, fontSize: 20 }}>🐛</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Trial Banner */}
+        <TrialBanner />
 
         <View style={styles.categoryBadgeContainer}>
           <Text style={[styles.categoryBadge, { 
@@ -877,6 +939,22 @@ const styles = StyleSheet.create({
   previewEmoji: { fontSize: 24, marginBottom: 4 },
   previewDay: { fontSize: 12, opacity: 0.7 },
   previewWeek: { fontSize: 12, opacity: 0.7 },
+  trialBanner: { 
+    marginHorizontal: 20, 
+    marginTop: 10, 
+    marginBottom: 5, 
+    padding: 12, 
+    borderRadius: 12, 
+    alignItems: 'center' 
+  },
+  trialBannerText: { 
+    fontSize: 14, 
+    fontWeight: 'bold' 
+  },
+  trialBannerSubtext: { 
+    fontSize: 12, 
+    marginTop: 4 
+  },
 });
 
 export default HomeScreen;
