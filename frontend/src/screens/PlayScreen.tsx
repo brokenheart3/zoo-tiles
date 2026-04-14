@@ -376,33 +376,34 @@ export default function PlayScreen() {
         }
         
         // For challenges - save completion to prevent replay
-        if (mode !== 'sequential') {
-          const saved = await saveChallengeResult(timer, isPerfect, accuracy);
+       if (mode !== 'sequential') {
+        const saved = await saveChallengeResult(timer, isPerfect, accuracy);
+  
+        if (saved) {
+          console.log('✅ Challenge result saved, updating context...');
           
-          if (saved) {
-            console.log('✅ Challenge marked as completed - cannot be played again');
-            
-            // Update the context
-            markChallengeCompleted(mode, {
-              bestTime: timer,
-              isPerfect: isPerfect,
-              moves,
-              correctMoves,
-              wrongMoves,
-              accuracy,
-              completed: true,
-              completedAt: new Date().toISOString()
-            }, selectedCategory);
-            
-            // Refresh challenge status
-            await refreshChallengeStatus(selectedCategory);
-            
-            // Increment player count
-            await incrementChallengePlayerCount(mode, selectedCategory);
-          } else {
-            console.error('❌ Failed to save challenge completion');
-          }
+          // Mark as completed
+          await markChallengeCompleted(mode, {
+            bestTime: timer,
+            isPerfect: isPerfect,
+            moves,
+            correctMoves,
+            wrongMoves,
+            accuracy,
+            completed: true,
+            completedAt: new Date().toISOString()
+          }, selectedCategory);
+          
+          // Refresh challenge status
+          await refreshChallengeStatus(selectedCategory);
+          
+          // IMPORTANT: Increment player count
+          console.log('📈 Incrementing player count for:', mode, selectedCategory);
+          await incrementChallengePlayerCount(mode, selectedCategory);
+          
+          console.log('✅ All completion steps finished');
         }
+      }
         
         setGameCompleted(true);
         

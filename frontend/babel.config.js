@@ -4,6 +4,11 @@ module.exports = function(api) {
   // Check if we're in production
   const isProduction = process.env.EXPO_PUBLIC_ENVIRONMENT === 'production';
   
+  // Determine which env file to use
+  const envFile = isProduction ? '.env.production' : '.env';
+  
+  console.log(`📦 Babel: Using ${envFile} (${isProduction ? 'Production' : 'Development'})`);
+  
   const plugins = [
     "@babel/plugin-proposal-optional-chaining",
     "@babel/plugin-proposal-nullish-coalescing-operator",
@@ -11,10 +16,10 @@ module.exports = function(api) {
       "module:react-native-dotenv",
       {
         moduleName: "@env",
-        path: ".env",
+        path: envFile,
         safe: false,
         allowUndefined: true,
-        verbose: true
+        verbose: false  // Set to false to reduce noise
       }
     ],
     // Add this for absolute imports

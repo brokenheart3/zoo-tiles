@@ -1,4 +1,4 @@
-// src/context/GameModeContext.tsx
+// src/context/GameModeContext.tsx (updated)
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
 import { auth } from '../services/firebase';
 import { getUserChallengeResult } from '../services/userService';
@@ -37,7 +37,7 @@ interface GameModeContextType {
   dailyLockStatus: ChallengeLockStatus;
   weeklyLockStatus: ChallengeLockStatus;
   refreshChallengeStatus: (category?: Category) => Promise<void>;
-  markChallengeCompleted: (type: 'daily' | 'weekly', result: any, category?: Category) => void;
+  markChallengeCompleted: (type: 'daily' | 'weekly', result: any, category?: Category) => Promise<void>;
   refreshTimers: () => void;
 }
 
@@ -66,6 +66,7 @@ export const GameModeProvider = ({ children }: { children: ReactNode }) => {
   const [timerInterval, setTimerInterval] = useState<number | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const currentCategoryRef = useRef<Category>('animals');
+  let refreshPromise: Promise<void> | null = null;
 
   const updateLockStatus = useCallback(() => {
     const dailyActive = isDailyChallengeActive();
@@ -103,54 +104,75 @@ export const GameModeProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    try {
-      currentCategoryRef.current = category;
-      const todayId = `daily-${getUTCDateString()}-${category}`;
-      const weekId = `weekly-${getWeekNumber(new Date())}-${category}`;
-      
-      console.log('🔄 Refreshing challenge status:', { todayId, weekId, category });
-      
-      const [daily, weekly] = await Promise.all([
-        getUserChallengeResult(user.uid, todayId),
-        getUserChallengeResult(user.uid, weekId)
-      ]);
-      
-      const dailyCompleted = daily?.completed === true;
-      const weeklyCompleted = weekly?.completed === true;
-      
-      console.log('📊 Results from Firebase:');
-      console.log('   Daily:', dailyCompleted, daily?.bestTime ? `Time: ${daily.bestTime}s` : '');
-      console.log('   Weekly:', weeklyCompleted, weekly?.bestTime ? `Time: ${weekly.bestTime}s` : '');
-      
-      setDailyCompletion({ completed: dailyCompleted, result: daily });
-      setWeeklyCompletion({ completed: weeklyCompleted, result: weekly });
-      
-      updateLockStatus();
-      
-      // Dispatch event for other components to know status changed
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('challengeStatusChanged', { 
-          detail: { daily: dailyCompleted, weekly: weeklyCompleted, category }
-        }));
-      }
-    } catch (error) {
-      console.error('Error refreshing challenge status:', error);
+    // Prevent concurrent refreshes
+    if (refreshPromise) {
+      return refreshPromise;
     }
+
+    refreshPromise = (async () => {
+      try {
+        currentCategoryRef.current = category;
+        const todayId = `daily-${getUTCDateString()}-${category}`;
+        const weekId = `weekly-${getWeekNumber(new Date())}-${category}`;
+        
+        console.log('🔄 Refreshing challenge status:', { todayId, weekId, category });
+        
+        const [daily, weekly] = await Promise.all([
+          getUserChallengeResult(user.uid, todayId),
+          getUserChallengeResult(user.uid, weekId)
+        ]);
+        
+        const dailyCompleted = daily?.completed === true;
+        const weeklyCompleted = weekly?.completed === true;
+        
+        console.log('📊 Results from Firebase:');
+        console.log('   Daily:', dailyCompleted, daily?.bestTime ? `Time: ${daily.bestTime}s` : '');
+        console.log('   Weekly:', weeklyCompleted, weekly?.bestTime ? `Time: ${weekly.bestTime}s` : '');
+        
+        setDailyCompletion({ completed: dailyCompleted, result: daily });
+        setWeeklyCompletion({ completed: weeklyCompleted, result: weekly });
+        
+        updateLockStatus();
+        
+        // Dispatch event for other components to know status changed
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('challengeStatusChanged', { 
+            detail: { daily: dailyCompleted, weekly: weeklyCompleted, category }
+          }));
+        }
+      } catch (error) {
+        console.error('Error refreshing challenge status:', error);
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+
+    return refreshPromise;
   }, [updateLockStatus]);
 
-  const markChallengeCompleted = useCallback((type: 'daily' | 'weekly', result: any, category: Category = 'animals') => {
+  const markChallengeCompleted = useCallback(async (type: 'daily' | 'weekly', result: any, category: Category = 'animals') => {
     console.log('🏆 markChallengeCompleted called:', { type, category, result });
     
+    // Update local state immediately for UI responsiveness
     if (type === 'daily') {
       setDailyCompletion({ completed: true, result });
-      console.log('✅ Daily challenge marked as completed in context');
+      console.log('✅ Daily challenge marked as completed in context (local)');
     } else {
       setWeeklyCompletion({ completed: true, result });
-      console.log('✅ Weekly challenge marked as completed in context');
+      console.log('✅ Weekly challenge marked as completed in context (local)');
     }
     
     updateLockStatus();
-  }, [updateLockStatus]);
+    
+    // Wait a moment for Firestore to save the data
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // IMPORTANT: Refresh from Firebase to ensure consistency
+    console.log('🔄 Refreshing from Firebase to confirm completion...');
+    await refreshChallengeStatus(category);
+    
+    console.log('✅ Challenge status refreshed from Firebase after completion');
+  }, [updateLockStatus, refreshChallengeStatus]);
 
   const refreshTimers = useCallback(() => {
     updateLockStatus();

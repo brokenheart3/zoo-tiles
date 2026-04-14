@@ -1,91 +1,38 @@
 // src/services/simpleChallengeService.ts
 import { db } from './firebase';
-import { doc, getDoc, setDoc, increment, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, increment, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
 import { Category } from './api';
+import { getUTCDateString, getWeekNumber as getWeekNumberUtil } from "../utils/timeUtils";
 
-export const getChallengePlayerCount = async (
-  type: 'daily' | 'weekly',
-  category?: Category
-): Promise<number> => {
+// Helper function to get week number as number
+function getWeekNumber(date: Date): number {
+  return parseInt(getWeekNumberUtil(date), 10);
+}
+
+export const getChallengePlayerCount = async (challengeType: 'daily' | 'weekly', category: string): Promise<number> => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const weekNumber = getWeekNumber(new Date());
+    const weekNum = getWeekNumber(new Date());
+    const challengeId = challengeType === 'daily' 
+      ? `daily-${getUTCDateString()}-${category}`
+      : `weekly-${weekNum}-${category}`;
     
-    // Include category in challenge ID if provided
-    const challengeId = type === 'daily' 
-      ? category ? `daily-${today}-${category}` : `daily-${today}`
-      : category ? `weekly-${weekNumber}-${category}` : `weekly-${weekNumber}`;
+    console.log(`🔍 Getting player count for: ${challengeId}`);
     
-    console.log(`🔍 Getting player count for ${type} challenge (${category || 'default'}):`, challengeId);
+    // Get from challenges collection
+    const challengeRef = doc(db, 'challenges', challengeId);
+    const challengeDoc = await getDoc(challengeRef);
     
-    // METHOD 1: Try to get from challenge_participants collection
-    try {
-      const participantsRef = doc(db, 'challenge_participants', challengeId);
-      const participantsDoc = await getDoc(participantsRef);
-      
-      if (participantsDoc.exists()) {
-        const data = participantsDoc.data();
-        const count = data.playerCount || 0;
-        console.log(`📊 ${type} challenge player count from participants: ${count}`);
-        return count;
-      }
-    } catch (error) {
-      console.log('No participants document found, trying daily/weekly challenges...');
+    if (challengeDoc.exists()) {
+      const data = challengeDoc.data();
+      const count = data.playerCount || 0;
+      console.log(`✅ Player count from challenges: ${count}`);
+      return count;
     }
     
-    // METHOD 2: Try daily_challenges or weekly_challenges collections
-    try {
-      const collectionName = type === 'daily' ? 'daily_challenges' : 'weekly_challenges';
-      const challengeRef = doc(db, collectionName, challengeId);
-      const challengeDoc = await getDoc(challengeRef);
-      
-      if (challengeDoc.exists()) {
-        const data = challengeDoc.data();
-        const count = data.participants || data.playerCount || 0;
-        console.log(`📊 ${type} challenge player count from ${collectionName}: ${count}`);
-        return count;
-      }
-    } catch (error) {
-      console.log(`No ${type} challenge document found`);
-    }
-    
-    // METHOD 3: Count from users' challenges
-    try {
-      console.log('🔍 Counting from users challenges...');
-      const usersRef = collection(db, 'users');
-      const usersSnapshot = await getDocs(usersRef);
-      
-      let completedCount = 0;
-      
-      for (const userDoc of usersSnapshot.docs) {
-        try {
-          const challengeRef = doc(db, 'users', userDoc.id, 'challenges', challengeId);
-          const challengeDoc = await getDoc(challengeRef);
-          
-          if (challengeDoc.exists()) {
-            const data = challengeDoc.data();
-            if (data.completed === true) {
-              completedCount++;
-            }
-          }
-        } catch (err) {
-          // Skip if no challenges subcollection
-        }
-      }
-      
-      console.log(`📊 Direct count from users: ${completedCount}`);
-      return completedCount;
-      
-    } catch (error) {
-      console.log('Could not count from users');
-    }
-    
-    // If all methods fail, return 0
-    console.log(`📊 No data found for ${challengeId}, returning 0`);
+    console.log(`⚠️ No challenge found for ${challengeId}, returning 0`);
     return 0;
-    
-  } catch (error: any) {
-    console.error('❌ Error getting player count:', error.code, error.message);
+  } catch (error) {
+    console.error('Error getting player count:', error);
     return 0;
   }
 };
@@ -95,122 +42,41 @@ export const incrementChallengePlayerCount = async (
   category?: Category
 ): Promise<void> => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const weekNumber = getWeekNumber(new Date());
-    
-    // Include category in challenge ID if provided
+    const weekNum = getWeekNumber(new Date());
     const challengeId = type === 'daily' 
-      ? category ? `daily-${today}-${category}` : `daily-${today}`
-      : category ? `weekly-${weekNumber}-${category}` : `weekly-${weekNumber}`;
+      ? `daily-${getUTCDateString()}-${category || 'animals'}`
+      : `weekly-${weekNum}-${category || 'animals'}`;
     
-    console.log(`📈 Incrementing player count for ${type} challenge (${category || 'default'}):`, challengeId);
+    console.log(`📈 Incrementing player count for ${type} challenge:`, challengeId);
     
-    // Try to increment in challenge_participants collection
-    try {
-      const participantsRef = doc(db, 'challenge_participants', challengeId);
-      await setDoc(participantsRef, {
+    const challengeRef = doc(db, 'challenges', challengeId);
+    const challengeDoc = await getDoc(challengeRef);
+    
+    if (challengeDoc.exists()) {
+      // Update existing document
+      await updateDoc(challengeRef, {
         playerCount: increment(1),
-        lastUpdated: new Date().toISOString(),
-        type,
-        challengeId,
-        category: category || 'default'
-      }, { merge: true });
-      
-      console.log(`✅ Player count incremented in challenge_participants`);
-      return;
-    } catch (error) {
-      console.log('Could not increment in challenge_participants, trying daily/weekly...');
+        lastUpdated: new Date().toISOString()
+      });
+      console.log(`✅ Player count incremented to ${(challengeDoc.data()?.playerCount || 0) + 1}`);
+    } else {
+      // Create new document with count 1
+      await setDoc(challengeRef, {
+        id: challengeId,
+        type: type,
+        playerCount: 1,
+        category: category || 'animals',
+        createdAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      });
+      console.log(`✅ New challenge document created with player count 1`);
     }
     
-    // Fallback: increment in daily_challenges or weekly_challenges
-    try {
-      const collectionName = type === 'daily' ? 'daily_challenges' : 'weekly_challenges';
-      const challengeRef = doc(db, collectionName, challengeId);
-      await setDoc(challengeRef, {
-        participants: increment(1),
-        lastUpdated: new Date().toISOString(),
-        category: category || 'default'
-      }, { merge: true });
-      
-      console.log(`✅ Player count incremented in ${collectionName}`);
-    } catch (error) {
-      console.error('❌ Could not increment player count anywhere');
-    }
+    // Verify the update
+    const verifyDoc = await getDoc(challengeRef);
+    console.log(`🔍 Verification - Player count is now: ${verifyDoc.data()?.playerCount}`);
     
   } catch (error: any) {
     console.error('❌ Error incrementing player count:', error.code, error.message);
   }
 };
-
-// Helper function to get player counts for all categories
-export const getAllCategoryPlayerCounts = async (type: 'daily' | 'weekly'): Promise<Record<string, number>> => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const weekNumber = getWeekNumber(new Date());
-    const baseId = type === 'daily' ? `daily-${today}` : `weekly-${weekNumber}`;
-    
-    const counts: Record<string, number> = {};
-    
-    // Try to get from challenge_participants
-    try {
-      const participantsRef = collection(db, 'challenge_participants');
-      const participantsSnapshot = await getDocs(participantsRef);
-      
-      participantsSnapshot.forEach(doc => {
-        const id = doc.id;
-        if (id.startsWith(baseId)) {
-          const category = id.replace(`${baseId}-`, '');
-          const data = doc.data();
-          counts[category] = data.playerCount || 0;
-        }
-      });
-    } catch (error) {
-      console.log('Could not get category counts from participants');
-    }
-    
-    return counts;
-  } catch (error) {
-    console.error('Error getting category counts:', error);
-    return {};
-  }
-};
-
-// Helper function to reset challenge count (for testing)
-export const resetChallengePlayerCount = async (
-  type: 'daily' | 'weekly',
-  category?: Category
-): Promise<void> => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const weekNumber = getWeekNumber(new Date());
-    
-    const challengeId = type === 'daily' 
-      ? category ? `daily-${today}-${category}` : `daily-${today}`
-      : category ? `weekly-${weekNumber}-${category}` : `weekly-${weekNumber}`;
-    
-    // Reset in challenge_participants
-    try {
-      const participantsRef = doc(db, 'challenge_participants', challengeId);
-      await setDoc(participantsRef, {
-        playerCount: 0,
-        lastUpdated: new Date().toISOString(),
-        type,
-        challengeId,
-        category: category || 'default'
-      }, { merge: true });
-      
-      console.log(`✅ Player count reset for ${challengeId}`);
-    } catch (error) {
-      console.error('❌ Could not reset player count');
-    }
-  } catch (error) {
-    console.error('Error resetting player count:', error);
-  }
-};
-
-// Helper function to get week number
-function getWeekNumber(date: Date): string {
-  const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
-  const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
-  return String(Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7));
-}

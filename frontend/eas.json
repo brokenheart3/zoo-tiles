@@ -43,10 +43,10 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "your-apple-id@example.com",
-        "ascAppId": "your-app-store-connect-id",
-        "sku": "SUDOKU_TILES_001",
-        "appleTeamId": "YOUR_TEAM_ID"
+        "appleId": "ckayssar1@gamil.com",
+        "ascAppId": "6761320553",
+        "sku": "SUDOKU_TILES_PRO_001",
+        "appleTeamId": "NLK68A5QA6"
       },
       "android": {
         "serviceAccountKeyPath": "./google-play-service-account.json",

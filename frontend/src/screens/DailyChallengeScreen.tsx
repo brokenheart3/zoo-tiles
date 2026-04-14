@@ -209,8 +209,10 @@ const DailyChallengeScreen = () => {
     useCallback(() => {
       console.log('📱 DailyChallengeScreen focused - refreshing data...');
       loadChallengeData();
+      // Also force refresh the context
+      refreshChallengeStatus(selectedCategory);
       return () => {};
-    }, [loadChallengeData])
+    }, [loadChallengeData, refreshChallengeStatus, selectedCategory])
   );
 
   // Initial load and timer

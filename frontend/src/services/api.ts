@@ -3,6 +3,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCategoryEmoji, getCategoryDisplayName } from '../utils/categoryHelpers';
 import { getUTCDateString, getWeekNumber } from '../utils/timeUtils';
+import Constants from 'expo-constants';
 
 // ============================
 // TYPES
@@ -42,9 +43,26 @@ export interface Fact {
 }
 
 // ============================
-// GITHUB RAW URL (Production)
+// BASE URL - Environment based
 // ============================
-const GITHUB_RAW_URL = 'https://raw.githubusercontent.com/brokenheart3/sudoAPI/main';
+
+// Get API URL from environment or app config
+const getBaseUrl = (): string => {
+  // Check if we have a custom URL from app config
+  const configUrl = Constants.expoConfig?.extra?.API_URL;
+  if (configUrl) return configUrl;
+  
+  // Check environment variable
+  const envUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (envUrl) return envUrl;
+  
+  // Development fallback
+  return __DEV__ ? 'http://localhost:3000' : 'https://sudoku-tiles-api.onrender.com';
+};
+
+const BASE_URL = getBaseUrl();
+
+console.log(`🌐 API Base URL: ${BASE_URL} (${__DEV__ ? 'Development' : 'Production'})`);
 
 // ============================
 // AXIOS CONFIG
@@ -181,7 +199,7 @@ export const getCategoryInfo = (category: Category) => {
 };
 
 // ============================
-// CORE: GET RANDOM PUZZLE FROM GITHUB
+// CORE: GET RANDOM PUZZLE FROM BACKEND
 // ============================
 async function getPuzzleFromRepo(
   category: Category, 
@@ -189,8 +207,6 @@ async function getPuzzleFromRepo(
   difficulty: string
 ): Promise<PuzzleResponse> {
   const difficultyFolder = getDifficultyFolder(difficulty);
-  const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const randomFileNum = fileNumbers[Math.floor(Math.random() * fileNumbers.length)];
   
   console.log('========== DEBUG ==========');
   console.log('Category:', category);
@@ -198,21 +214,21 @@ async function getPuzzleFromRepo(
   console.log('Difficulty:', difficulty);
   
   try {
-    const url = `${GITHUB_RAW_URL}/${category}/${size}/${difficultyFolder}/${difficultyFolder}_${size}_${randomFileNum}.json`;
-    console.log('Fetching from GitHub:', url);
+    const url = `${BASE_URL}/puzzle/${category}/${size}/${difficultyFolder}`;
+    console.log('Fetching from backend:', url);
     
-    const puzzles = await loadJson<any[]>(url);
+    const puzzle = await loadJson<PuzzleResponse>(url);
     
-    if (puzzles && puzzles.length > 0) {
-      const randomIndex = Math.floor(Math.random() * puzzles.length);
-      console.log('Selected puzzle ID:', puzzles[randomIndex]?.id);
-      console.log('=========================');
-      return { ...puzzles[randomIndex], category };
+    if (!puzzle) {
+      throw new Error('No puzzle returned from backend');
     }
     
-    throw new Error('No puzzle returned from GitHub');
+    console.log('Selected puzzle ID:', puzzle.id);
+    console.log('=========================');
+    
+    return { ...puzzle, category };
   } catch (error) {
-    console.error('Failed to fetch puzzle from GitHub:', error);
+    console.error('Failed to fetch puzzle from backend:', error);
     throw new Error(`No puzzle found for ${category}/${size}/${difficulty}`);
   }
 }
@@ -245,24 +261,21 @@ export async function fetchDailyChallenge(
 ): Promise<PuzzleResponse | null> {
   const utcDate: string = getUTCDateString();
   const dayOfYear: number = getUTCDayOfYear();
-  const fileNumbers: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const fileNum: number = fileNumbers[dayOfYear % fileNumbers.length];
   
-  console.log('📅 fetchDailyChallenge - UTC Date:', utcDate, 'Day of Year:', dayOfYear, 'File Num:', fileNum, { category, size });
+  console.log('📅 fetchDailyChallenge - UTC Date:', utcDate, 'Day of Year:', dayOfYear, { category, size });
   
   try {
-    const url = `${GITHUB_RAW_URL}/${category}/${size}/easy/easy_${size}_${fileNum}.json`;
-    console.log('Fetching daily challenge from GitHub:', url);
+    const url = `${BASE_URL}/daily/${category}/${size}?date=${utcDate}`;
+    console.log('Fetching daily challenge from:', url);
     
-    const puzzles = await loadJson<any[]>(url);
+    const puzzle = await loadJson<PuzzleResponse>(url);
     
-    if (puzzles && puzzles.length > 0) {
-      const puzzleIndex: number = dayOfYear % puzzles.length;
-      console.log('✅ Daily puzzle loaded, ID:', puzzles[puzzleIndex]?.id, 'for UTC date:', utcDate);
-      return { ...puzzles[puzzleIndex], category };
+    if (!puzzle) {
+      throw new Error('No daily puzzle returned');
     }
     
-    throw new Error('No daily puzzle returned');
+    console.log('✅ Daily puzzle loaded, ID:', puzzle.id, 'for UTC date:', utcDate);
+    return { ...puzzle, category };
   } catch (err) {
     console.error('❌ Daily fetch failed for UTC date:', utcDate, err);
     return null;
@@ -277,24 +290,21 @@ export async function fetchWeeklyChallenge(
   size: number
 ): Promise<PuzzleResponse | null> {
   const utcWeekNumber: number = getWeekNumberAsNumber();
-  const fileNumbers: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const fileNum: number = fileNumbers[utcWeekNumber % fileNumbers.length];
   
-  console.log('📆 fetchWeeklyChallenge - UTC Week:', utcWeekNumber, 'File Num:', fileNum, { category, size });
+  console.log('📆 fetchWeeklyChallenge - UTC Week:', utcWeekNumber, { category, size });
   
   try {
-    const url = `${GITHUB_RAW_URL}/${category}/${size}/easy/easy_${size}_${fileNum}.json`;
-    console.log('Fetching weekly challenge from GitHub:', url);
+    const url = `${BASE_URL}/weekly/${category}/${size}?week=${utcWeekNumber}`;
+    console.log('Fetching weekly challenge from:', url);
     
-    const puzzles = await loadJson<any[]>(url);
+    const puzzle = await loadJson<PuzzleResponse>(url);
     
-    if (puzzles && puzzles.length > 0) {
-      const puzzleIndex: number = utcWeekNumber % puzzles.length;
-      console.log('✅ Weekly puzzle loaded, ID:', puzzles[puzzleIndex]?.id, 'for UTC week:', utcWeekNumber);
-      return { ...puzzles[puzzleIndex], category };
+    if (!puzzle) {
+      throw new Error('No weekly puzzle returned');
     }
     
-    throw new Error('No weekly puzzle returned');
+    console.log('✅ Weekly puzzle loaded, ID:', puzzle.id, 'for UTC week:', utcWeekNumber);
+    return { ...puzzle, category };
   } catch (err) {
     console.error('❌ Weekly fetch failed for UTC week:', utcWeekNumber, err);
     return null;
@@ -302,7 +312,7 @@ export async function fetchWeeklyChallenge(
 }
 
 // ============================
-// 4️⃣ CATEGORY FACTS - FROM GITHUB
+// 4️⃣ CATEGORY FACTS
 // ============================
 let factsCache: Record<string, CategoryFact[]> = {};
 
@@ -313,8 +323,8 @@ export async function fetchCategoryFacts(category: Category): Promise<CategoryFa
       return factsCache[category];
     }
     
-    const url = `${GITHUB_RAW_URL}/${category}/facts/${category}_fact.json`;
-    console.log(`📚 Fetching ${category} facts from GitHub:`, url);
+    const url = `${BASE_URL}/facts/${category}`;
+    console.log(`📚 Fetching ${category} facts from:`, url);
     
     const facts = await loadJson<CategoryFact[]>(url);
     
@@ -379,33 +389,54 @@ export async function fetchDailyCategoryFact(category: Category = 'animals'): Pr
 // 6️⃣ GET AVAILABLE SIZES
 // ============================
 export async function getAvailableSizes(): Promise<number[]> {
-  return [5, 6, 7, 8, 9, 10, 11, 12, 16];
+  try {
+    const url = `${BASE_URL}/sizes`;
+    const response = await loadJson<{ sizes: number[] }>(url);
+    return response.sizes || [5, 6, 7, 8, 9, 10, 11, 12, 16];
+  } catch (err) {
+    console.error('Failed to fetch sizes:', err);
+    return [5, 6, 7, 8, 9, 10, 11, 12, 16];
+  }
 }
 
 // ============================
 // 7️⃣ GET AVAILABLE DIFFICULTIES
 // ============================
 export async function getAvailableDifficulties(): Promise<string[]> {
-  return ['easy', 'medium', 'hard', 'expert'];
+  try {
+    const url = `${BASE_URL}/difficulties`;
+    const response = await loadJson<{ difficulties: string[] }>(url);
+    return response.difficulties || ['easy', 'medium', 'hard', 'expert'];
+  } catch (err) {
+    console.error('Failed to fetch difficulties:', err);
+    return ['easy', 'medium', 'hard', 'expert'];
+  }
 }
 
 // ============================
 // 8️⃣ GET ALL CATEGORIES
 // ============================
 export async function getAvailableCategories(): Promise<Category[]> {
-  return getAllCategories();
+  try {
+    const url = `${BASE_URL}/categories`;
+    const response = await loadJson<{ categories: Category[] }>(url);
+    return response.categories || getAllCategories();
+  } catch (err) {
+    console.error('Failed to fetch categories:', err);
+    return getAllCategories();
+  }
 }
 
 // ============================
-// 9️⃣ CHECK BACKEND HEALTH (GitHub)
+// 9️⃣ CHECK BACKEND HEALTH
 // ============================
 export async function checkBackendHealth(): Promise<boolean> {
   try {
-    const url = `${GITHUB_RAW_URL}/animals/5/easy/easy_5_1.json`;
-    const response = await loadJson<any>(url);
-    return response !== null;
+    const url = `${BASE_URL}/health`;
+    const response = await loadJson<{ status: string }>(url);
+    return response.status === 'ok';
   } catch (err) {
-    console.error('GitHub health check failed:', err);
+    console.error('Backend health check failed:', err);
     return false;
   }
 }

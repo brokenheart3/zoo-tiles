@@ -1,4 +1,4 @@
-// src/screens/HomeScreen.tsx - Add paywall integration
+// src/screens/HomeScreen.tsx
 import React, { useContext, useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
@@ -16,7 +16,7 @@ import { ThemeContext, themeStyles } from "../context/ThemeContext";
 import { useSettings } from "../context/SettingsContext";
 import { useProfile } from "../context/ProfileContext";
 import { useGameMode } from "../context/GameModeContext";
-import { useSubscription } from "../context/SubscriptionContext"; // Add this import
+import { useSubscription } from "../context/SubscriptionContext";
 import { goToPlay } from "../navigation/goToPlay";
 import { challengeService } from "../services/challengeService";
 
@@ -149,7 +149,7 @@ const HomeScreen: React.FC = () => {
     refreshChallengeStatus,
   } = useGameMode();
   
-  const { isSubscribed, presentPaywall, trialDaysRemaining } = useSubscription(); // Add subscription hook
+  const { isSubscribed, presentPaywall, trialDaysRemaining } = useSubscription();
   
   const colors = themeStyles[theme];
   
@@ -232,12 +232,19 @@ const HomeScreen: React.FC = () => {
     try {
       const category = selectedCategory as ChallengeCategory;
       
-      // IMPORTANT: Refresh challenge status first to get latest completion state
+      // Refresh challenge status first to get latest completion state
       await refreshChallengeStatus(category);
       
       // Load daily challenge metadata
       const dailyMetadata = await challengeService.getChallengeMetadata('daily', currentGridSize, category);
       const dailyPlayerCount = await challengeService.getChallengePlayerCount('daily', category);
+      
+      console.log('📊 Daily Challenge:', {
+        playerCount: dailyPlayerCount,
+        title: dailyMetadata.name,
+        emoji: dailyMetadata.challengeEmoji,
+        completed: dailyCompleted
+      });
       
       setDailyChallengeState({
         playerCount: dailyPlayerCount,
@@ -250,6 +257,13 @@ const HomeScreen: React.FC = () => {
       const weeklyMetadata = await challengeService.getChallengeMetadata('weekly', currentGridSize, category);
       const weeklyPlayerCount = await challengeService.getChallengePlayerCount('weekly', category);
       
+      console.log('📊 Weekly Challenge:', {
+        playerCount: weeklyPlayerCount,
+        title: weeklyMetadata.name,
+        emoji: weeklyMetadata.challengeEmoji,
+        completed: weeklyCompleted
+      });
+      
       setWeeklyChallengeState({
         playerCount: weeklyPlayerCount,
         loading: false,
@@ -257,19 +271,6 @@ const HomeScreen: React.FC = () => {
         emoji: weeklyMetadata.challengeEmoji,
       });
       
-      console.log('📛 Challenge data loaded:', {
-        category,
-        daily: {
-          title: dailyMetadata.name,
-          emoji: dailyMetadata.challengeEmoji,
-          completed: dailyCompleted,
-        },
-        weekly: {
-          title: weeklyMetadata.name,
-          emoji: weeklyMetadata.challengeEmoji,
-          completed: weeklyCompleted,
-        }
-      });
     } catch (error) {
       console.error('Error loading challenge data:', error);
       // Fallback to category helpers
@@ -292,7 +293,6 @@ const HomeScreen: React.FC = () => {
   const checkPremiumAccess = async (featureName: string): Promise<boolean> => {
     if (isSubscribed) return true;
     
-    // Show paywall and wait for result
     const subscribed = await presentPaywall();
     if (!subscribed) {
       Alert.alert(
@@ -519,6 +519,22 @@ const HomeScreen: React.FC = () => {
     return '#2E7D32';
   };
 
+  // Add this debug function to HomeScreen.tsx
+  const debugPlayerCount = async () => {
+    const category = selectedCategory as ChallengeCategory;
+    const dailyCount = await challengeService.getChallengePlayerCount('daily', category);
+    const weeklyCount = await challengeService.getChallengePlayerCount('weekly', category);
+    
+    console.log('👥 Player Count Debug:');
+    console.log('  Daily:', dailyCount);
+    console.log('  Weekly:', weeklyCount);
+    
+    Alert.alert(
+      'Player Count',
+      `Daily Challenge: ${dailyCount} players\nWeekly Challenge: ${weeklyCount} players`
+    );
+  };
+
   // Navigation handlers with subscription check
   const handleDailyChallengePress = async () => {
     console.log('Daily challenge pressed - Status:', {
@@ -553,7 +569,6 @@ const HomeScreen: React.FC = () => {
       return;
     }
     
-    // Check subscription for daily challenge
     const canAccess = await checkPremiumAccess('Daily Challenges');
     if (!canAccess) return;
     
@@ -597,7 +612,6 @@ const HomeScreen: React.FC = () => {
       return;
     }
     
-    // Check subscription for weekly challenge
     const canAccess = await checkPremiumAccess('Weekly Challenges');
     if (!canAccess) return;
     
@@ -609,7 +623,6 @@ const HomeScreen: React.FC = () => {
   };
 
   const handleQuickPlayPress = async () => {
-    // Check subscription for quick play
     const canAccess = await checkPremiumAccess('Quick Play');
     if (!canAccess) return;
     
@@ -692,35 +705,6 @@ const HomeScreen: React.FC = () => {
   const userId = auth.currentUser?.uid || 'player123';
   const userName = profile?.name?.split(' ')[0] || 'A Player';
 
-  // Debug function
-  const debugStatus = async () => {
-    Alert.alert(
-      'Challenge Status',
-      `📅 Daily Challenge:\n` +
-      `   Display: ${dailyChallenge.title}\n` +
-      `   Title from service: ${dailyChallengeState.title}\n` +
-      `   Emoji from service: ${dailyChallengeState.emoji}\n` +
-      `   Completed: ${dailyCompleted ? '✅ Yes' : '❌ No'}\n` +
-      `   Expired: ${isDailyExpired ? '✅ Yes' : '❌ No'}\n` +
-      `   Remaining: ${dailyRemaining}\n` +
-      `   Category: ${getCategoryDisplayName(selectedCategory)}\n` +
-      `   Grid Size: ${currentGridSize}\n` +
-      `   Difficulty: ${currentDifficulty}\n` +
-      `   Subscribed: ${isSubscribed ? '✅ Yes' : '❌ No'}\n` +
-      `   Trial Days: ${trialDaysRemaining}\n\n` +
-      `📆 Weekly Challenge:\n` +
-      `   Display: ${weeklyChallenge.title}\n` +
-      `   Title from service: ${weeklyChallengeState.title}\n` +
-      `   Emoji from service: ${weeklyChallengeState.emoji}\n` +
-      `   Completed: ${weeklyCompleted ? '✅ Yes' : '❌ No'}\n` +
-      `   Expired: ${isWeeklyExpired ? '✅ Yes' : '❌ No'}\n` +
-      `   Remaining: ${weeklyRemaining}\n` +
-      `   Category: ${getCategoryDisplayName(selectedCategory)}\n` +
-      `   Grid Size: ${currentGridSize}\n` +
-      `   Difficulty: ${currentDifficulty}`
-    );
-  };
-
   // Trial banner component
   const TrialBanner = () => {
     if (isSubscribed || trialDaysRemaining <= 0) return null;
@@ -761,9 +745,6 @@ const HomeScreen: React.FC = () => {
             onSettingsPress={() => navigation.navigate('Settings')}
             onProfilePress={() => navigation.navigate('Profile')}
           />
-          <TouchableOpacity onPress={debugStatus} style={styles.debugButton}>
-            <Text style={{ color: colors.text, fontSize: 20 }}>🐛</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Trial Banner */}

@@ -1,64 +1,49 @@
 // src/components/PaywallButton.tsx
-import React, { useState } from 'react';
-import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import { presentPaywall } from '../services/paywallService';
+import React from 'react';
+import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import { useSubscription } from '../context/SubscriptionContext';
+import { ThemeContext, themeStyles } from '../context/ThemeContext';
 
 interface PaywallButtonProps {
   title?: string;
-  buttonStyle?: object;
-  textStyle?: object;
-  onPurchaseComplete?: () => void;
-  onPurchaseCancelled?: () => void;
+  compact?: boolean;
+  onPress?: () => void;
 }
 
-export const PaywallButton: React.FC<PaywallButtonProps> = ({
-  title = 'Unlock Premium',
-  buttonStyle,
-  textStyle,
-  onPurchaseComplete,
-  onPurchaseCancelled,
+export const PaywallButton: React.FC<PaywallButtonProps> = ({ 
+  title = "Upgrade to Premium", 
+  compact = false,
+  onPress 
 }) => {
-  const [loading, setLoading] = useState(false);
-  const { refreshStatus, isSubscribed } = useSubscription();
+  const { theme } = React.useContext(ThemeContext);
+  const colors = themeStyles[theme];
+  const { isSubscribed, presentPaywall, trialDaysRemaining } = useSubscription();
 
-  const handlePress = async () => {
-    if (loading) return;
-    
-    setLoading(true);
-    try {
-      const result = await presentPaywall();
-      
-      if (result.purchased || result.restored) {
-        await refreshStatus();
-        Alert.alert('Success!', 'Thank you for subscribing!');
-        onPurchaseComplete?.();
-      } else if (result.cancelled) {
-        onPurchaseCancelled?.();
-      } else if (result.error) {
-        Alert.alert('Error', result.error);
-      }
-    } catch (error) {
-      console.error('Error in paywall:', error);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Don't show button if already subscribed
   if (isSubscribed) return null;
 
+  const handlePress = async () => {
+    if (onPress) {
+      onPress();
+    }
+    await presentPaywall();
+  };
+
   return (
-    <TouchableOpacity
-      style={[styles.button, buttonStyle]}
+    <TouchableOpacity 
+      style={[
+        styles.button, 
+        compact ? styles.compactButton : styles.fullButton,
+        { backgroundColor: colors.button }
+      ]}
       onPress={handlePress}
-      disabled={loading}
     >
-      {loading ? (
-        <ActivityIndicator color="#fff" />
-      ) : (
-        <Text style={[styles.buttonText, textStyle]}>{title}</Text>
+      <Text style={[styles.buttonText, { color: colors.text }]}>
+        {compact ? '⭐' : `🎁 ${trialDaysRemaining > 0 ? `${trialDaysRemaining} days left! ` : ''}${title}`}
+      </Text>
+      {!compact && trialDaysRemaining > 0 && (
+        <Text style={[styles.subText, { color: colors.text + 'CC' }]}>
+          Start 14-day free trial
+        </Text>
       )}
     </TouchableOpacity>
   );
@@ -66,16 +51,26 @@ export const PaywallButton: React.FC<PaywallButtonProps> = ({
 
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  fullButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    minWidth: 200,
+  },
+  compactButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
   buttonText: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  subText: {
+    fontSize: 12,
+    marginTop: 4,
   },
 });
