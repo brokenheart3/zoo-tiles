@@ -1,5 +1,4 @@
-// server.js or index.ts - UPDATED WITH UTC SUPPORT
-
+// src/server.ts
 import express from "express";
 import axios from "axios";
 import cors from "cors";
@@ -7,13 +6,11 @@ import { config } from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// Get current directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Load environment variables
-const envPath = path.join(__dirname, "..", ".env");
-config({ path: envPath });
+config({ path: path.join(__dirname, "../.env") });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,134 +19,96 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Debug middleware
+// Request logging middleware
 app.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.url}`);
   next();
 });
 
-// =========================
-// GitHub Token
-// =========================
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    message: "Sudoku Tiles API is running!",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// GitHub configuration
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/brokenheart3/sudoAPI/main";
 
 console.log("🔐 GitHub Token configured:", GITHUB_TOKEN ? "Yes ✅" : "No ❌");
-console.log("📡 Using GitHub Raw URL:", GITHUB_RAW_URL);
+console.log("📡 GitHub Raw URL:", GITHUB_RAW_URL);
 
-// =========================
-// UTC Helper Functions
-// =========================
-
-/**
- * Get UTC date string in YYYY-MM-DD format
- */
-function getUTCDateString(date: Date = new Date()): string {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+// Helper to fetch JSON with timeout and retry
+async function fetchJson<T>(url: string, retries: number = 2): Promise<T | null> {
+  console.log(`🌐 Fetching: ${url.substring(0, 100)}...`);
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      const headers: any = { "Accept": "application/json" };
+      if (GITHUB_TOKEN) {
+        headers["Authorization"] = `token ${GITHUB_TOKEN}`;
+      }
+      const resp = await axios.get<T>(url, { 
+        headers, 
+        timeout: 10000 
+      });
+      return resp.data;
+    } catch (err: any) {
+      console.error(`❌ Attempt ${i + 1} failed: ${err?.response?.status || err?.message}`);
+      if (i === retries - 1) return null;
+      // Wait 1 second before retry
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+  return null;
 }
 
-/**
- * Get UTC day of year (1-366)
- */
+// UTC Helper Functions
 function getUTCDayOfYear(date: Date = new Date()): number {
-  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 0));
-  const diff = date.getTime() - start.getTime();
+  const start = Date.UTC(date.getUTCFullYear(), 0, 0);
+  const diff = date.getTime() - start;
   const oneDay = 86400000;
   return Math.floor(diff / oneDay);
 }
 
-/**
- * Get UTC week number (1-53)
- */
 function getUTCWeekNumber(date: Date = new Date()): number {
-  const utcDate = new Date(Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate()
-  ));
-  
-  const firstDayOfYear = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
-  const pastDaysOfYear = (utcDate.getTime() - firstDayOfYear.getTime()) / 86400000;
-  const weekNumber = Math.ceil((pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7);
-  
-  return weekNumber;
+  const firstDayOfYear = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
+  return Math.ceil((pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7);
 }
 
-/**
- * Get deterministic file number based on UTC date
- */
-function getDailyFileNumber(date: Date = new Date()): number {
-  const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const dayOfYear = getUTCDayOfYear(date);
-  return fileNumbers[dayOfYear % fileNumbers.length];
-}
+// ============================
+// API ENDPOINTS
+// ============================
 
-/**
- * Get deterministic file number based on UTC week
- */
-function getWeeklyFileNumber(date: Date = new Date()): number {
-  const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const weekNumber = getUTCWeekNumber(date);
-  return fileNumbers[weekNumber % fileNumbers.length];
-}
-
-// =========================
-// Helper to fetch JSON with token
-// =========================
-async function fetchJson<T>(url: string): Promise<T | null> {
-  console.log(`🌐 Fetching URL: ${url}`);
-  try {
-    const headers: any = { "Accept": "application/json" };
-    if (GITHUB_TOKEN) {
-      headers["Authorization"] = `token ${GITHUB_TOKEN}`;
+// Root endpoint
+app.get("/", (req, res) => {
+  res.json({
+    name: "Sudoku Tiles API",
+    version: "1.0.0",
+    status: "running",
+    endpoints: {
+      health: "/health",
+      puzzle: "/puzzle/:category/:size/:difficulty",
+      daily: "/daily/:category/:size",
+      weekly: "/weekly/:category/:size",
+      facts: "/facts/:category",
+      sizes: "/sizes",
+      difficulties: "/difficulties",
+      categories: "/categories"
     }
-    const resp = await axios.get<T>(url, { headers });
-    console.log(`✅ Success! Status: ${resp.status}`);
-    return resp.data;
-  } catch (err: any) {
-    console.error(`❌ Failed to fetch: ${url}`);
-    console.error(`   Status: ${err?.response?.status}`);
-    console.error(`   Message: ${err?.message}`);
-    return null;
-  }
-}
-
-// =========================
-// Test route to check GitHub access
-// =========================
-app.get("/test-github", async (req, res) => {
-  console.log("🧪 Testing GitHub access...");
-  
-  const testUrl = `${GITHUB_RAW_URL}/animals/5/easy/easy_5_1.json`;
-  const result = await fetchJson<any>(testUrl);
-  
-  if (result) {
-    res.json({ success: true, message: "GitHub access working!", data: result });
-  } else {
-    res.json({ success: false, message: "GitHub access failed. Check token and file paths." });
-  }
+  });
 });
 
-// =========================
-// SIMPLE TEST ROUTES
-// =========================
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", message: "Server is running!" });
-});
-
-app.get("/test", (req, res) => {
-  res.json({ message: "Test endpoint works!" });
-});
-
-// =========================
-// Get Random Puzzle
-// =========================
+// Get random puzzle
 app.get("/puzzle/:category/:size/:difficulty", async (req, res) => {
   const { category, size, difficulty } = req.params;
-  console.log(`\n🎮 Puzzle endpoint called with: category=${category}, size=${size}, difficulty=${difficulty}`);
+  
+  console.log(`🎮 Puzzle request: ${category}/${size}/${difficulty}`);
   
   try {
     const sizeNum = parseInt(size);
@@ -157,155 +116,92 @@ app.get("/puzzle/:category/:size/:difficulty", async (req, res) => {
     const randomFileNum = fileNumbers[Math.floor(Math.random() * fileNumbers.length)];
     
     const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${randomFileNum}.json`;
-    console.log(`📂 Attempting to fetch: ${url}`);
-    
     const puzzles = await fetchJson<any[]>(url);
     
     if (puzzles && puzzles.length > 0) {
       const randomIndex = Math.floor(Math.random() * puzzles.length);
-      console.log(`✅ Found puzzle! Returning index ${randomIndex}`);
+      console.log(`✅ Puzzle found: ${puzzles[randomIndex]?.id}`);
       res.json({ ...puzzles[randomIndex], category });
     } else {
-      console.log(`❌ No puzzles found in file`);
-      res.status(404).json({ 
-        error: "No puzzle found",
-        attempted_url: url,
-        category,
-        size,
-        difficulty
-      });
+      console.log(`❌ No puzzle found for ${category}/${size}/${difficulty}`);
+      res.status(404).json({ error: "No puzzle found" });
     }
   } catch (error) {
-    console.error("Error in puzzle endpoint:", error);
+    console.error("Error:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// =========================
-// Daily Challenge - USING UTC
-// =========================
+// Daily challenge
 app.get("/daily/:category/:size", async (req, res) => {
   const { category, size } = req.params;
   
-  // Get UTC date from query parameter or use current UTC time
-  let targetDate = new Date();
-  if (req.query.date) {
-    targetDate = new Date(req.query.date as string);
-  }
-  
-  const utcDateString = getUTCDateString(targetDate);
-  const utcDayOfYear = getUTCDayOfYear(targetDate);
-  const fileNum = getDailyFileNumber(targetDate);
-  
-  console.log(`\n📅 Daily endpoint called with:`);
-  console.log(`   Category: ${category}`);
-  console.log(`   Size: ${size}`);
-  console.log(`   UTC Date: ${utcDateString}`);
-  console.log(`   UTC Day of Year: ${utcDayOfYear}`);
-  console.log(`   Selected File Number: ${fileNum}`);
+  console.log(`📅 Daily challenge request: ${category}/${size}`);
   
   try {
     const sizeNum = parseInt(size);
     const difficulty = "easy";
+    const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    
+    const dayOfYear = getUTCDayOfYear();
+    const fileNum = fileNumbers[dayOfYear % fileNumbers.length];
     
     const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${fileNum}.json`;
-    console.log(`📂 Attempting to fetch daily: ${url}`);
-    
     const puzzles = await fetchJson<any[]>(url);
     
     if (puzzles && puzzles.length > 0) {
-      // Use UTC day of year to determine which puzzle index
-      const puzzleIndex = utcDayOfYear % puzzles.length;
-      console.log(`✅ Found daily puzzle! UTC Date: ${utcDateString}, Puzzle Index: ${puzzleIndex}`);
+      const puzzleIndex = dayOfYear % puzzles.length;
+      console.log(`✅ Daily puzzle found: ${puzzles[puzzleIndex]?.id} (Day ${dayOfYear})`);
       res.json({ ...puzzles[puzzleIndex], category });
     } else {
-      console.log(`❌ No daily puzzles found`);
-      res.status(404).json({ 
-        error: "No daily puzzle found",
-        attempted_url: url,
-        category,
-        size,
-        utcDate: utcDateString
-      });
+      console.log(`❌ No daily puzzle found for ${category}/${size}`);
+      res.status(404).json({ error: "No daily puzzle found" });
     }
   } catch (error) {
-    console.error("Error in daily endpoint:", error);
+    console.error("Error:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// =========================
-// Weekly Challenge - USING UTC
-// =========================
+// Weekly challenge
 app.get("/weekly/:category/:size", async (req, res) => {
   const { category, size } = req.params;
   
-  // Get UTC week from query parameter or use current UTC time
-  let targetDate = new Date();
-  let targetWeek: number | null = null;
-  
-  if (req.query.week) {
-    targetWeek = parseInt(req.query.week as string);
-  }
-  
-  const utcWeekNumber = targetWeek !== null ? targetWeek : getUTCWeekNumber(targetDate);
-  const fileNum = getWeeklyFileNumber(targetDate);
-  
-  // If a specific week was provided, we need to create a date for that week
-  // to ensure consistent puzzle selection
-  let seedValue = utcWeekNumber;
-  if (targetWeek !== null) {
-    seedValue = targetWeek;
-  }
-  
-  console.log(`\n📆 Weekly endpoint called with:`);
-  console.log(`   Category: ${category}`);
-  console.log(`   Size: ${size}`);
-  console.log(`   UTC Week: ${utcWeekNumber}`);
-  console.log(`   Selected File Number: ${fileNum}`);
-  console.log(`   Seed Value: ${seedValue}`);
+  console.log(`📆 Weekly challenge request: ${category}/${size}`);
   
   try {
     const sizeNum = parseInt(size);
     const difficulty = "easy";
+    const fileNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    
+    const weekNumber = getUTCWeekNumber();
+    const fileNum = fileNumbers[weekNumber % fileNumbers.length];
     
     const url = `${GITHUB_RAW_URL}/${category}/${sizeNum}/${difficulty}/${difficulty}_${sizeNum}_${fileNum}.json`;
-    console.log(`📂 Attempting to fetch weekly: ${url}`);
-    
     const puzzles = await fetchJson<any[]>(url);
     
     if (puzzles && puzzles.length > 0) {
-      // Use UTC week number to determine which puzzle index
-      const puzzleIndex = seedValue % puzzles.length;
-      console.log(`✅ Found weekly puzzle! UTC Week: ${utcWeekNumber}, Puzzle Index: ${puzzleIndex}`);
+      const puzzleIndex = weekNumber % puzzles.length;
+      console.log(`✅ Weekly puzzle found: ${puzzles[puzzleIndex]?.id} (Week ${weekNumber})`);
       res.json({ ...puzzles[puzzleIndex], category });
     } else {
-      console.log(`❌ No weekly puzzles found`);
-      res.status(404).json({ 
-        error: "No weekly puzzle found",
-        attempted_url: url,
-        category,
-        size,
-        utcWeek: utcWeekNumber
-      });
+      console.log(`❌ No weekly puzzle found for ${category}/${size}`);
+      res.status(404).json({ error: "No weekly puzzle found" });
     }
   } catch (error) {
-    console.error("Error in weekly endpoint:", error);
+    console.error("Error:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// =========================
-// Category Facts
-// =========================
+// Category facts
 app.get("/facts/:category", async (req, res) => {
   const { category } = req.params;
-  console.log(`\n📚 Facts endpoint called with: category=${category}`);
+  
+  console.log(`📚 Facts request: ${category}`);
   
   try {
     const url = `${GITHUB_RAW_URL}/${category}/facts/${category}_fact.json`;
-    console.log(`📂 Attempting to fetch facts: ${url}`);
-    
     const facts = await fetchJson<any[]>(url);
     
     if (facts && facts.length > 0) {
@@ -313,62 +209,61 @@ app.get("/facts/:category", async (req, res) => {
       res.json(facts);
     } else {
       console.log(`❌ No facts found for ${category}`);
-      res.status(404).json({ 
-        error: `No facts found for ${category}`,
-        attempted_url: url,
-        category
-      });
+      res.status(404).json({ error: "No facts found" });
     }
   } catch (error) {
-    console.error("Error in facts endpoint:", error);
+    console.error("Error:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// =========================
-// Debug endpoint to check UTC values
-// =========================
-app.get("/debug/utc", (req, res) => {
-  const now = new Date();
-  const utcDate = getUTCDateString(now);
-  const utcDayOfYear = getUTCDayOfYear(now);
-  const utcWeekNumber = getUTCWeekNumber(now);
-  const dailyFileNum = getDailyFileNumber(now);
-  const weeklyFileNum = getWeeklyFileNumber(now);
-  
-  res.json({
-    local: {
-      time: now.toString(),
-      date: now.toLocaleDateString(),
-      hours: now.getHours(),
-      dayOfWeek: now.getDay()
-    },
-    utc: {
-      time: now.toUTCString(),
-      date: utcDate,
-      dayOfYear: utcDayOfYear,
-      weekNumber: utcWeekNumber,
-      dailyFileNumber: dailyFileNum,
-      weeklyFileNumber: weeklyFileNum
-    },
-    timezoneOffset: -now.getTimezoneOffset() / 60,
-    message: "All challenges use UTC date/week for consistency worldwide"
+// Get available sizes
+app.get("/sizes", (req, res) => {
+  res.json({ sizes: [5, 6, 7, 8, 9, 10, 11, 12, 16] });
+});
+
+// Get available difficulties
+app.get("/difficulties", (req, res) => {
+  res.json({ difficulties: ["easy", "medium", "hard", "expert"] });
+});
+
+// Get available categories
+app.get("/categories", async (req, res) => {
+  const categories = [
+    "aircraft", "animals", "arabic", "birds", "bugs", "cars", "clothing",
+    "colors", "cyrillic", "devanagari", "emotions", "fantasy", "fish",
+    "flags", "flowers", "food", "fruits", "games", "geography", "greek",
+    "hebrew", "holidays", "latin", "math", "music", "numbers", "office",
+    "planets", "plants", "roadSigns", "science", "shapes", "sports", "tech",
+    "time", "tools", "trains", "transport", "vegetables", "weather"
+  ];
+  res.json({ categories });
+});
+
+// Error handling middleware
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('❌ Unhandled error:', err);
+  res.status(500).json({ error: "Internal server error" });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: `Cannot ${req.method} ${req.url}` });
+});
+
+// Start server
+const server = app.listen(PORT, () => {
+  console.log(`\n✅ Sudoku Tiles API running on port ${PORT}`);
+  console.log(`📍 Local: http://localhost:${PORT}`);
+  console.log(`❤️ Health check: http://localhost:${PORT}/health\n`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
   });
 });
 
-// =========================
-// Start Server
-// =========================
-app.listen(PORT, () => {
-  console.log(`\n✅ Sudoku Tiles API running at http://localhost:${PORT}`);
-  console.log(`📡 GitHub Token: ${GITHUB_TOKEN ? "Yes ✅" : "No ❌"}`);
-  console.log(`\n📋 Available endpoints:`);
-  console.log(`   GET http://localhost:${PORT}/health`);
-  console.log(`   GET http://localhost:${PORT}/test`);
-  console.log(`   GET http://localhost:${PORT}/test-github`);
-  console.log(`   GET http://localhost:${PORT}/debug/utc (DEBUG UTC VALUES)`);
-  console.log(`   GET http://localhost:${PORT}/puzzle/:category/:size/:difficulty`);
-  console.log(`   GET http://localhost:${PORT}/daily/:category/:size?date=YYYY-MM-DD`);
-  console.log(`   GET http://localhost:${PORT}/weekly/:category/:size?week=1-53`);
-  console.log(`   GET http://localhost:${PORT}/facts/:category`);
-});
+export default app;
